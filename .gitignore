@@ -37,6 +37,7 @@ yarn-error.*
 *.tsbuildinfo
 
 example
+.idea/
 
 # generated native folders
 /ios
@@ -45,3 +46,4 @@ example
 # local env (EXPO_PUBLIC_API_URL)
 .env
 !.env.example
+
