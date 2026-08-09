@@ -15,7 +15,7 @@ pkgs.mkShell {
     echo "  npm      $(npm --version)"
     echo "  watchman $(watchman --version)"
     echo ""
-    echo "  npx expo start          start Metro; scan QR with Expo Go"
+    echo "  npm run start:tailnet          start Metro; scan QR with Expo Go"
     echo "  npx expo start --tunnel same, via relay (if LAN discovery fails)"
     echo ""
   '';
