@@ -72,6 +72,15 @@ resend of a line it just rejected. That is amber in the UI, not green and not re
 A 200 can still be a partial failure: `rowsAdded` counts what was written and `parseErrors`
 lists the lines the model refused. Green is reserved for `rowsAdded > 0` with no `parseErrors`.
 
+**Never pad the composer's edges with a `Platform.OS` constant.** A full-screen `Modal` covers the
+status bar, and 20pt put the close button under the clock on every Dynamic Island iPhone. No
+constant works across notch and home-button iPhones, Android's edge-to-edge gesture bar and web,
+so the sheet nests its own `SafeAreaProvider` inside the `Modal` and reads `useSafeAreaInsets()`.
+The nesting is load-bearing: an Android `Modal` is a separate native window, and only a provider
+inside it measures *that* window. `ComposerBody` is split from `ActivityComposer` solely so it
+sits below that provider — while the composer's state stays in the shell, because `Modal` renders
+nothing while hidden and body-owned state would discard half-typed entries on close.
+
 # Screens still to build
 
 `(tabs)/pending` and `(tabs)/submit` are placeholders. They need backend step 05 (OneAdvanced
