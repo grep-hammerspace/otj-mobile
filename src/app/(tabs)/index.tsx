@@ -1,13 +1,22 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { HealthCheck } from "../../components/health-check";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityComposer } from "../../components/activity-composer";
+import { ResultBanner } from "../../components/result-banner";
+import type { LogActivitiesResponse } from "../../lib/activities-api";
 import { logout } from "../../lib/auth-api";
 import { useAuth } from "../../lib/auth";
 
-/** Req 2 — the big text box. Placeholder until backend step 05 lands the notes endpoints. */
+/**
+ * Req 2 — the home screen. One job: get activities written down and sent.
+ *
+ * <p>The last outcome stays on screen after the sheet closes, because "did that actually go
+ * through?" is the question this screen exists to answer.
+ */
 export default function Log() {
   const { signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [lastResult, setLastResult] = useState<LogActivitiesResponse | null>(null);
 
   const onSignOut = async () => {
     setSigningOut(true);
@@ -18,9 +27,27 @@ export default function Log() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Log</Text>
-      <HealthCheck />
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.title}>Log your hours</Text>
+        <Text style={styles.subtitle}>
+          Write what you did in plain English. The backend works out the date, the duration and the
+          description for each entry.
+        </Text>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add activities"
+          onPress={() => setComposerOpen(true)}
+          style={({ pressed }) => [styles.addButton, pressed ? styles.addButtonPressed : null]}
+        >
+          <Text style={styles.addButtonPlus}>+</Text>
+          <Text style={styles.addButtonText}>Add activities</Text>
+        </Pressable>
+
+        <LastResult result={lastResult} />
+      </ScrollView>
+
       <Pressable
         accessibilityRole="button"
         onPress={onSignOut}
@@ -29,26 +56,105 @@ export default function Log() {
       >
         <Text style={styles.signOutText}>{signingOut ? "Signing out…" : "Sign out"}</Text>
       </Pressable>
+
+      <ActivityComposer
+        visible={composerOpen}
+        onClose={() => setComposerOpen(false)}
+        onLogged={setLastResult}
+      />
     </View>
   );
 }
 
+/** The one-line version of what the composer showed in full. */
+function LastResult({ result }: { result: LogActivitiesResponse | null }) {
+  if (!result) return null;
+
+  if (result.status === "no new content") {
+    return (
+      <ResultBanner
+        tone="warning"
+        title="Nothing new logged"
+        detail="Your last submission matched what the server had already processed."
+        style={styles.banner}
+      />
+    );
+  }
+
+  const failed = result.parseErrors?.length ?? 0;
+  const tone = result.rowsAdded === 0 ? "error" : failed > 0 ? "warning" : "success";
+
+  return (
+    <ResultBanner
+      tone={tone}
+      title={
+        result.rowsAdded === 0
+          ? "Last attempt logged nothing"
+          : `Last submission logged ${result.rowsAdded} ${
+              result.rowsAdded === 1 ? "activity" : "activities"
+            }`
+      }
+      detail={
+        failed > 0
+          ? `${failed} ${failed === 1 ? "entry" : "entries"} could not be read. Reopen to fix ${
+              failed === 1 ? "it" : "them"
+            }.`
+          : null
+      }
+      style={styles.banner}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
+    backgroundColor: "#ffffff",
+  },
+  content: {
     padding: 24,
+    paddingTop: 32,
+    gap: 8,
   },
   title: {
-    fontSize: 24,
-    fontWeight: "600",
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  subtitle: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: "#6b7280",
+    marginBottom: 20,
+  },
+  addButton: {
+    backgroundColor: "#208AEF",
+    borderRadius: 14,
+    paddingVertical: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  addButtonPressed: {
+    backgroundColor: "#1a6fbf",
+  },
+  addButtonPlus: {
+    color: "#ffffff",
+    fontSize: 36,
+    fontWeight: "300",
+    lineHeight: 40,
+  },
+  addButtonText: {
+    color: "#ffffff",
+    fontSize: 19,
+    fontWeight: "700",
+  },
+  banner: {
+    marginTop: 24,
   },
   signOut: {
-    marginTop: 24,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    alignItems: "center",
+    paddingVertical: 14,
   },
   signOutPressed: {
     opacity: 0.6,
