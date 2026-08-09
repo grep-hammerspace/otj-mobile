@@ -50,12 +50,42 @@ The server refuses to say whether a failed login was a bad username or a bad pas
 returns one message for invalid/used/expired invite codes alike. Don't infer more specific
 messages from status codes — that would undo the point.
 
+# Logging activities
+
+```
+lib/activities-api.ts        POST /otj-services/log-activities + its response types
+components/activity-composer.tsx  the "Add activities" sheet
+components/result-banner.tsx      red / amber / green outcome box
+app/(tabs)/index.tsx              Log screen: the big button + the last outcome
+```
+
+The wire format is a single `content` string, and **one line is one activity** — the server
+splits on `\n` and `llm_prompt.txt` tells the model to "process each line of the input
+independently". Hence one bordered box per entry in the UI and `normaliseEntry` collapsing every
+whitespace run to a space on the way out: a newline the user typed mid-thought would otherwise
+become a second, half-formed activity.
+
+The server diffs `content` against the **previous** submission and only sends new lines to the
+model, so it answers `{"status": "no new content"}` for an unchanged resend — including a
+resend of a line it just rejected. That is amber in the UI, not green and not red.
+
+A 200 can still be a partial failure: `rowsAdded` counts what was written and `parseErrors`
+lists the lines the model refused. Green is reserved for `rowsAdded > 0` with no `parseErrors`.
+
+**Never pad the composer's edges with a `Platform.OS` constant.** A full-screen `Modal` covers the
+status bar, and 20pt put the close button under the clock on every Dynamic Island iPhone. No
+constant works across notch and home-button iPhones, Android's edge-to-edge gesture bar and web,
+so the sheet nests its own `SafeAreaProvider` inside the `Modal` and reads `useSafeAreaInsets()`.
+The nesting is load-bearing: an Android `Modal` is a separate native window, and only a provider
+inside it measures *that* window. `ComposerBody` is split from `ActivityComposer` solely so it
+sits below that provider — while the composer's state stays in the shell, because `Modal` renders
+nothing while hidden and body-owned state would discard half-typed entries on close.
+
 # Screens still to build
 
-`(tabs)/index` (Log), `(tabs)/pending` and `(tabs)/submit` are placeholders. They need
-backend step 05 (OneAdvanced credentials in request bodies rather than stored server-side)
-and the 05.5 list/delete endpoints, which do not exist yet. Build them against real
-endpoints, not mocks.
+`(tabs)/pending` and `(tabs)/submit` are placeholders. They need backend step 05 (OneAdvanced
+credentials in request bodies rather than stored server-side) and the 05.5 list/delete
+endpoints, which do not exist yet. Build them against real endpoints, not mocks.
 
 # Checks
 
