@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -20,6 +21,7 @@ import {
   type ActivityRow,
   type LogActivitiesResponse,
 } from "../lib/activities-api";
+import { pendingKey } from "../lib/pending-api";
 import { ResultBanner, tones } from "./result-banner";
 
 /**
@@ -73,6 +75,7 @@ export function ActivityComposer({ visible, onClose, onLogged }: ComposerProps) 
 
 /** Everything the sheet does, minus how it is presented. Held by the shell so it outlives a close. */
 function useComposer(onClose: () => void, onLogged?: (result: LogActivitiesResponse) => void) {
+  const queryClient = useQueryClient();
   const nextId = useRef(1);
   const blank = (): Entry => ({ id: `entry-${nextId.current++}`, text: "" });
 
@@ -132,7 +135,10 @@ function useComposer(onClose: () => void, onLogged?: (result: LogActivitiesRespo
       const res = await logActivities(submitted.map((e) => e.text));
       setResult(res);
       onLogged?.(res);
-      if (res.status === "ok") keepOnlyRejected(res.parseErrors ?? [], submitted);
+      keepOnlyRejected(res.parseErrors ?? [], submitted);
+      // Those rows are now in the unposted queue, and the Pending tab stays mounted once visited —
+      // without this it would keep showing the list as it was before this submit.
+      if (res.rowsAdded > 0) queryClient.invalidateQueries({ queryKey: pendingKey });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not log those activities.");
     } finally {
@@ -297,16 +303,6 @@ function Outcome({
   if (error) return <ResultBanner tone="error" title="Not logged" detail={error} />;
   if (!result) return null;
 
-  if (result.status === "no new content") {
-    return (
-      <ResultBanner
-        tone="warning"
-        title="Nothing new to log"
-        detail="These lines match your last submission exactly, so the server skipped them. Change the wording if this really is a separate activity."
-      />
-    );
-  }
-
   const parseErrors = result.parseErrors ?? [];
   const tone = result.rowsAdded === 0 ? "error" : parseErrors.length > 0 ? "warning" : "success";
   const title =
@@ -318,8 +314,8 @@ function Outcome({
 
   return (
     <ResultBanner tone={tone} title={title}>
-      {result.rows.map((row, i) => (
-        <LoggedRow key={row.id ?? `row-${i}`} row={row} />
+      {result.rows.map((row) => (
+        <LoggedRow key={row.id} row={row} />
       ))}
       {parseErrors.map((err, i) => (
         <View key={`err-${i}`} style={styles.rejected}>

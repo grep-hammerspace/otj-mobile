@@ -9,39 +9,48 @@ import { apiJson } from "./api";
  * no matter how the text was typed on a phone keyboard.
  */
 
-/** A row the model parsed and the backend wrote to Mongo, still unposted to OneAdvanced. */
+/**
+ * One unposted activity row, as both `POST /log-activities` and `GET /pending` return it.
+ *
+ * <p>Narrower than the record the server stores: no `tailscaleUserId` (the client never receives
+ * the server-minted userId), no `posted` (false by construction on any endpoint that returns
+ * this), no `learnerId` / `unitId` / `activityType`. Defined here rather than in `pending-api.ts`
+ * only because this module had it first — it belongs to neither endpoint in particular.
+ */
 export type ActivityRow = {
-  tailscaleUserId: string;
-  learnerId: string;
-  /** The activity description — `comments` in the model's output. */
-  activityImpact: string;
-  unitId: string;
+  /** Mongo's ObjectId, always present. The handle `deletePending` takes. */
+  id: string;
   /** `YYYY/MM/DD`. */
   activityDate: string;
-  /** `HH:MM` start time, or `""` when the entry never mentioned one. */
+  /** `HH:MM` start time, or `""` when the entry never mentioned one. Never null. */
   activityTime: string;
-  activityType: number;
   hours: number;
   minutes: number;
-  posted: boolean;
-  id: string | null;
+  /** The activity description — `comments` in the model's output. */
+  activityImpact: string;
+  /** RFC 3339 UTC, second precision. Derived server-side from the ObjectId's timestamp. */
+  createdAt: string;
 };
 
 /** A line the model refused: no duration, no description, or hours outside 09:00–18:00. */
 export type ParseError = {
-  error: string;
+  /** Mirrors the server's `ParsedActivities.ErrorCode` enum, which is closed. */
+  error: "missing_duration" | "missing_description" | "outside_working_hours";
   message: string | null;
   /** The offending input line, echoed back. Used to re-populate the box that produced it. */
   raw: string;
 };
 
 /**
- * Two 200-shaped answers, told apart by `status`. "no new content" is not a failure — it is the
- * server saying the diff against the previous submission was empty.
+ * The only 200 shape. `parseErrors` is absent rather than empty when every line parsed — the
+ * server serialises with `NON_NULL`.
  */
-export type LogActivitiesResponse =
-  | { status: "ok"; rowsAdded: number; rows: ActivityRow[]; parseErrors?: ParseError[] | null }
-  | { status: "no new content"; detail: string };
+export type LogActivitiesResponse = {
+  status: "ok";
+  rowsAdded: number;
+  rows: ActivityRow[];
+  parseErrors?: ParseError[] | null;
+};
 
 /**
  * Flattens one entry to a single line.
@@ -62,10 +71,15 @@ export function toLines(entries: string[]): string[] {
 /**
  * Sends the entries as newline-separated lines.
  *
- * <p>The server keeps the last `content` it saw and only passes *new* lines to the model, so
- * resending an unchanged line comes back as "no new content" rather than a duplicate row. Sending
- * only the current batch — not a running document — is what makes that dedup line up with what
- * the user sees on screen.
+ * <p>`content` is the batch on screen right now, never a running document of everything logged so
+ * far. The server passes whatever it is given straight to the model and writes a row for every
+ * line that parses — it keeps no snapshot and does no deduplication — so a running document would
+ * re-log its whole history on each submit. The rule is: one request is one batch, and every line
+ * in it is meant to become a row.
+ *
+ * <p>Which also means an identical resubmission produces a genuine duplicate. The composer's
+ * submit button is disabled while this is in flight for exactly that reason; anything that still
+ * gets through is visible and deletable in the Pending tab.
  */
 export async function logActivities(entries: string[]): Promise<LogActivitiesResponse> {
   const lines = toLines(entries);

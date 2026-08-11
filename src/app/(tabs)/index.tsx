@@ -29,11 +29,8 @@ export default function Log() {
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Log your hours</Text>
-        <Text style={styles.subtitle}>
-          Write what you did in plain English. The backend works out the date, the duration and the
-          description for each entry.
-        </Text>
+        <Text style={styles.title}>Log Activities</Text>
+        <Text style={styles.subtitle}>Write a brief summary of what you did, and make sure to include a time period.</Text>
 
         <Pressable
           accessibilityRole="button"
@@ -69,17 +66,6 @@ export default function Log() {
 /** The one-line version of what the composer showed in full. */
 function LastResult({ result }: { result: LogActivitiesResponse | null }) {
   if (!result) return null;
-
-  if (result.status === "no new content") {
-    return (
-      <ResultBanner
-        tone="warning"
-        title="Nothing new logged"
-        detail="Your last submission matched what the server had already processed."
-        style={styles.banner}
-      />
-    );
-  }
 
   const failed = result.parseErrors?.length ?? 0;
   const tone = result.rowsAdded === 0 ? "error" : failed > 0 ? "warning" : "success";

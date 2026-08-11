@@ -4,9 +4,8 @@ import type { ReactNode } from "react";
 /**
  * The red / amber / green box that reports what the server did with a request.
  *
- * <p>Amber is not decoration: "logged 2 of 3" and "no new content" are neither successes nor
- * failures, and colouring them green would tell the user their text landed when some of it
- * didn't.
+ * <p>Amber is not decoration: "logged 2 of 3" is neither a success nor a failure, and colouring
+ * it green would tell the user their text landed when some of it didn't.
  */
 export type Tone = "success" | "warning" | "error";
 

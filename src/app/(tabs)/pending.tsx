@@ -1,25 +1,289 @@
-import { StyleSheet, Text, View } from "react-native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from "react-native-gesture-handler/ReanimatedSwipeable";
+import { ResultBanner } from "../../components/result-banner";
+import { formatDuration, type ActivityRow } from "../../lib/activities-api";
+import { ApiError } from "../../lib/api";
+import {
+  deletePending,
+  formatTotalMinutes,
+  getPending,
+  pendingKey,
+  relativeTime,
+} from "../../lib/pending-api";
 
-/** Req 3 — unposted list, swipe-to-delete. Needs backend 05.5. Placeholder. */
+/**
+ * Req 3 — the unposted queue: everything logged but not yet pushed to OneAdvanced.
+ *
+ * <p>This is where a duplicate or a misparsed line gets fixed. The server does no deduplication,
+ * so "log it twice by accident" is a thing that happens; being able to delete the exact wrong row
+ * is the answer to it.
+ */
 export default function Pending() {
+  const queryClient = useQueryClient();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const list = useQuery({ queryKey: pendingKey, queryFn: getPending });
+
+  const remove = useMutation({
+    mutationFn: deletePending,
+    onMutate: () => setDeleteError(null),
+    onError: (e) => {
+      // 404 is "no unposted row with that id for you" — deleted from another device, or already
+      // posted. The row is gone either way, which is what the user asked for, so the refetch in
+      // `onSettled` is the whole response. Reporting it would be reporting a success as a failure.
+      if (e instanceof ApiError && e.status === 404) return;
+      setDeleteError(e instanceof Error ? e.message : "Could not delete that activity.");
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: pendingKey }),
+  });
+
+  if (list.isPending) {
+    return (
+      <View style={styles.centred}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (list.isError) {
+    return (
+      <View style={styles.centred}>
+        <ResultBanner
+          tone="error"
+          title="Could not load your queue"
+          detail={list.error instanceof Error ? list.error.message : "Something went wrong."}
+        />
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => list.refetch()}
+          style={({ pressed }) => [styles.retry, pressed ? styles.pressed : null]}
+        >
+          <Text style={styles.retryText}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const { activities, count, totalMinutes } = list.data;
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Pending</Text>
-      <Text>Placeholder — unposted entries list.</Text>
-    </View>
+    <FlatList
+      data={activities}
+      keyExtractor={(row) => row.id}
+      contentContainerStyle={[styles.content, activities.length === 0 ? styles.contentEmpty : null]}
+      refreshControl={
+        <RefreshControl refreshing={list.isRefetching} onRefresh={() => list.refetch()} />
+      }
+      ListHeaderComponent={
+        <View style={styles.headerBlock}>
+          {count > 0 ? (
+            <Text style={styles.summary}>
+              {count} {count === 1 ? "activity" : "activities"} ·{" "}
+              <Text style={styles.summaryTotal}>{formatTotalMinutes(totalMinutes)} queued</Text>
+            </Text>
+          ) : null}
+          {deleteError ? <ResultBanner tone="error" title="Not deleted" detail={deleteError} /> : null}
+        </View>
+      }
+      ListEmptyComponent={
+        <View style={styles.empty}>
+          <Text style={styles.emptyTitle}>Nothing queued</Text>
+          <Text style={styles.emptyBody}>
+            Activities you log show up here until they are submitted to OneAdvanced. Pull down to
+            refresh.
+          </Text>
+        </View>
+      }
+      renderItem={({ item }) => (
+        <PendingItem
+          row={item}
+          deleting={remove.isPending && remove.variables === item.id}
+          onDelete={() => remove.mutate(item.id)}
+        />
+      )}
+    />
+  );
+}
+
+/**
+ * One row, swipe-left to reveal Delete.
+ *
+ * <p>Two steps rather than one on purpose: a swipe that deleted on release would destroy a row on
+ * a stray gesture, and there is no undo — the backend deletes for real.
+ */
+function PendingItem({
+  row,
+  deleting,
+  onDelete,
+}: {
+  row: ActivityRow;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
+  // `activityTime` is `""` when the entry never gave a start time, so it drops out of the line
+  // rather than leaving a dangling separator.
+  const meta = [row.activityDate, formatDuration(row.hours, row.minutes), row.activityTime]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <ReanimatedSwipeable
+      friction={2}
+      rightThreshold={40}
+      overshootRight={false}
+      enabled={!deleting}
+      renderRightActions={(_progress, _translation, swipeable: SwipeableMethods) => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Delete activity: ${row.activityImpact}`}
+          onPress={() => {
+            swipeable.close();
+            onDelete();
+          }}
+          style={({ pressed }) => [styles.deleteAction, pressed ? styles.deleteActionPressed : null]}
+        >
+          <Text style={styles.deleteActionText}>Delete</Text>
+        </Pressable>
+      )}
+    >
+      {/*
+        The swipe is invisible to a screen reader, so the same action is published as an
+        accessibility action. Without it the queue would be readable but not editable with
+        VoiceOver or TalkBack on.
+      */}
+      <View
+        accessible
+        accessibilityLabel={`${row.activityImpact}. ${meta}. Added ${relativeTime(row.createdAt)}.`}
+        accessibilityActions={[{ name: "delete", label: "Delete activity" }]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === "delete") onDelete();
+        }}
+        style={[styles.row, deleting ? styles.rowDeleting : null]}
+      >
+        <Text style={styles.rowMeta}>{meta}</Text>
+        <Text style={styles.rowText}>{row.activityImpact}</Text>
+        <Text style={styles.rowAdded}>added {relativeTime(row.createdAt)}</Text>
+      </View>
+    </ReanimatedSwipeable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  centred: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 16,
     padding: 24,
   },
-  title: {
-    fontSize: 24,
+  content: {
+    padding: 16,
+    gap: 10,
+  },
+  contentEmpty: {
+    flexGrow: 1,
+  },
+  headerBlock: {
+    gap: 10,
+  },
+  summary: {
+    fontSize: 14,
+    color: "#6b7280",
+    paddingBottom: 2,
+  },
+  summaryTotal: {
+    fontWeight: "700",
+    color: "#374151",
+  },
+  empty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 24,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#374151",
+  },
+  emptyBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#6b7280",
+    textAlign: "center",
+  },
+  row: {
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    padding: 12,
+    gap: 4,
+  },
+  rowDeleting: {
+    opacity: 0.5,
+  },
+  rowMeta: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#208AEF",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  rowText: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: "#111827",
+  },
+  rowAdded: {
+    fontSize: 12,
+    color: "#9ca3af",
+  },
+  /** Fixed width so the revealed button is the same size whatever the row's height. */
+  deleteAction: {
+    width: 96,
+    marginLeft: 10,
+    borderRadius: 10,
+    backgroundColor: "#dc2626",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteActionPressed: {
+    backgroundColor: "#b91c1c",
+  },
+  deleteActionText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  retry: {
+    minHeight: 44,
+    paddingHorizontal: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 22,
+  },
+  retryText: {
+    fontSize: 16,
     fontWeight: "600",
+    color: "#208AEF",
+  },
+  pressed: {
+    opacity: 0.6,
   },
 });
