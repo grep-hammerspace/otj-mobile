@@ -2,7 +2,8 @@ import { apiJson } from "./api";
 import type { ActivityRow } from "./activities-api";
 
 /**
- * The unposted queue — `GET /otj-services/pending` and `DELETE /otj-services/pending/{id}`.
+ * The unposted queue — `GET /otj-services/pending`, `PUT /otj-services/pending/{id}` and
+ * `DELETE /otj-services/pending/{id}`.
  *
  * <p>These are rows the backend has written but not yet pushed to OneAdvanced. The row shape is
  * `ActivityRow`, the same one `POST /log-activities` answers with, so a row can be deleted
@@ -39,6 +40,41 @@ export type PendingResponse = {
  */
 export async function getPending(): Promise<PendingResponse> {
   return apiJson<PendingResponse>("/otj-services/pending");
+}
+
+/**
+ * The editable subset of a row, as `PUT /pending/{id}` takes it.
+ *
+ * <p>Everything else about a row — `id`, `createdAt`, and the server-side `learnerId`, `unitId`,
+ * `activityType`, `posted` and `tailscaleUserId` the client never sees — is not the user's to set.
+ * `activityTime` may be `""`; that is a value, not an omission.
+ */
+export type ActivityUpdate = {
+  activityDate: string;
+  activityTime: string;
+  hours: number;
+  minutes: number;
+  activityImpact: string;
+};
+
+/**
+ * Replaces the editable fields of one unposted row. Answers with the row as it now stands.
+ *
+ * <p>A full replacement rather than a partial update: the sheet has every editable field on screen
+ * anyway, so there is never a reason to distinguish "unset this" from "leave this alone".
+ *
+ * <p>404 means what it means on `deletePending` — unknown id, someone else's, or posted while the
+ * sheet was open — and the server refuses to say which. So it is "the row is gone", not "the save
+ * failed": close the sheet and refetch rather than reporting an error the user can do nothing with.
+ *
+ * <p>Sanitise with `normaliseDraft` before calling. The server re-checks everything regardless;
+ * the client-side pass exists to put the error under the field instead of after a round trip.
+ */
+export async function updatePending(id: string, update: ActivityUpdate): Promise<ActivityRow> {
+  return apiJson<ActivityRow>(`/otj-services/pending/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(update),
+  });
 }
 
 /**
