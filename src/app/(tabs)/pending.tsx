@@ -132,11 +132,13 @@ function PendingItem({
   deleting: boolean;
   onDelete: () => void;
 }) {
-  // `activityTime` is `""` when the entry never gave a start time, so it drops out of the line
-  // rather than leaving a dangling separator.
-  const meta = [row.activityDate, formatDuration(row.hours, row.minutes), row.activityTime]
-    .filter(Boolean)
-    .join(" · ");
+  // `activityTime` is `""` when the entry never gave a start time, so the whole "starting at"
+  // clause drops rather than leaving a dangling preposition.
+  const duration = formatDuration(row.hours, row.minutes);
+  const meta = [
+    row.activityDate,
+    row.activityTime ? `${duration} starting at ${row.activityTime}` : duration,
+  ].join(" · ");
 
   return (
     <ReanimatedSwipeable
