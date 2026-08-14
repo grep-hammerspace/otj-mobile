@@ -115,11 +115,53 @@ rather than reporting a failure.
 `_layout.tsx` wraps the app in `GestureHandlerRootView` because of this screen's swipe. It has to
 be outermost and `flex: 1`, or gestures below it never fire.
 
-# Screens still to build
+# Submitting to OneAdvanced
 
-`(tabs)/submit` is a placeholder. It needs backend step 05 — OneAdvanced credentials in request
-bodies rather than stored server-side — which does not exist yet; `/prepare-browser` and
-`/azure-id/prepare` both answer 501 until it lands. Build it against real endpoints, not mocks.
+```
+lib/oa-credentials.ts           the OneAdvanced username/password + remembered route, on-device only
+lib/biometric.ts                the Face ID / fingerprint gate
+lib/submit-api.ts               prepare + complete for both routes, and SubmitOutcome
+components/credentials-sheet.tsx  where the credentials are entered, changed and forgotten
+app/(tabs)/submit.tsx           route picker, the button, the challenge number, the code field
+```
+
+**The two prepare endpoints answer 501 today.** Backend step 05 — OneAdvanced credentials in
+request bodies rather than stored server-side — has not landed, so `/prepare-browser` and
+`/azure-id/prepare` are stubs and a run ends with the 501's message on screen. The request shapes
+the client sends are step 05's own (`steps-04-08-implementation-plan.md` §05.1–05.2 in
+`../otjServices`); the response shapes are what the pre-501 code at `51bd46c` actually returned.
+Build against those, not mocks.
+
+Two routes, two calls each, and they are alternatives rather than steps — an account gets in one
+way or the other:
+
+- **Azure** — `POST /azure-id/prepare` sends a Microsoft Authenticator push and answers
+  `login_complete` or `push_sent`, the latter sometimes with a `challengeNumber` the user must tap
+  in the app. `GET /azure-id/complete` then blocks up to 125 s waiting for the approval.
+- **OneAdvanced** — `POST /prepare-browser` stops at the TOTP field; `POST /submit-with-mfa` carries
+  the code the user reads off their authenticator. Those codes expire in ~30 s, so the field is
+  inline on the screen rather than behind a sheet.
+
+Things not to undo:
+
+- **Posting the queue is the tail of the *second* call, on both routes.** There is no separate
+  "now post" endpoint, and `login_complete` still has to call `complete` to get anything sent.
+- **`prepare` parks a driver in the server's `UserStateStore`,** one per user. Both calls must reach
+  the same backend process, and switching route mid-run resets the screen for that reason.
+- **A 502 `{"status": "all_failed"}` is an outcome, not a fault** — the login worked and OneAdvanced
+  refused every row. `submit-api.ts` reads that body itself instead of letting `apiJson` throw it as
+  "the server had a problem", which would send the user to retry the wrong thing.
+- **`complete` retries on a dropped connection.** 125 s of silence outlives some platforms' idle
+  timeout, and re-calling just waits on the same background poll. A 408 is *not* retried: that one
+  means nobody approved.
+- **The biometric gate fails open** when the device has no enrolled biometrics — including Expo Go
+  on iOS, where Face ID needs a development build. A phone that cannot show the prompt must still be
+  able to submit; the gate is a second lock on top of the device's own, not what makes the
+  credentials safe.
+
+Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
+keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"
+is what clears them.
 
 # Checks
 
