@@ -115,11 +115,96 @@ rather than reporting a failure.
 `_layout.tsx` wraps the app in `GestureHandlerRootView` because of this screen's swipe. It has to
 be outermost and `flex: 1`, or gestures below it never fire.
 
-# Screens still to build
+# Submitting to OneAdvanced
 
-`(tabs)/submit` is a placeholder. It needs backend step 05 — OneAdvanced credentials in request
-bodies rather than stored server-side — which does not exist yet; `/prepare-browser` and
-`/azure-id/prepare` both answer 501 until it lands. Build it against real endpoints, not mocks.
+```
+lib/oa-credentials.ts           the OneAdvanced username/password + remembered route, on-device only
+lib/biometric.ts                the Face ID / fingerprint gate
+lib/submit-api.ts               prepare + complete for both routes, and SubmitOutcome
+lib/profile-api.ts              GET/PATCH /auth/me — the account, for the learner ID
+components/credentials-sheet.tsx  where the credentials are entered, changed and forgotten
+app/(tabs)/submit.tsx           route picker, the button, the challenge number, the code field,
+                                and the learner ID card
+```
+
+**All four endpoints are live on `staging`.** Backend step 05 — OneAdvanced credentials in request
+bodies rather than stored server-side — landed as otjServices #33, and the two prepare endpoints
+stopped being 501 stubs with it.
+
+Read the shipped records, not `steps-04-08-implementation-plan.md`. The plan called the credential
+fields `oneAdvancedUsername` / `oneAdvancedPassword`; what shipped is
+`OneAdvancedCredentials(String username, String password)`, and this client sent the plan's names
+until it was checked against `staging`. That mistake is invisible from the client side — Jackson
+drops unknown keys, so both fields arrive null and the call comes back 400 "credentials missing",
+which looks exactly like a wrong OneAdvanced password. Two other outcomes are worth knowing before
+reading a failure as a bug: a failed login is **401** with a deliberately generic message (the
+driver's own text leaks the username through `login_hint` URLs), and an account with no learner ID
+is **409**, checked before the login so the Azure route cannot make someone approve a push and wait
+two minutes for nothing.
+
+Two routes, two calls each, and they are alternatives rather than steps — an account gets in one
+way or the other:
+
+- **Azure** — `POST /azure-id/prepare` sends a Microsoft Authenticator push and answers
+  `login_complete` or `push_sent`, the latter sometimes with a `challengeNumber` the user must tap
+  in the app. `GET /azure-id/complete` then blocks up to 125 s waiting for the approval.
+- **OneAdvanced** — `POST /prepare-browser` stops at the TOTP field; `POST /submit-with-mfa` carries
+  the code the user reads off their authenticator. Those codes expire in ~30 s, so the field is
+  inline on the screen rather than behind a sheet.
+
+Things not to undo:
+
+- **Posting the queue is the tail of the *second* call, on both routes.** There is no separate
+  "now post" endpoint, and `login_complete` still has to call `complete` to get anything sent.
+- **`prepare` parks a driver in the server's `UserStateStore`,** one per user. Both calls must reach
+  the same backend process, and switching route mid-run resets the screen for that reason.
+- **A 502 `{"status": "all_failed"}` is an outcome, not a fault** — the login worked and OneAdvanced
+  refused every row. `submit-api.ts` reads that body itself instead of letting `apiJson` throw it as
+  "the server had a problem", which would send the user to retry the wrong thing.
+- **`complete` retries on a dropped connection.** 125 s of silence outlives some platforms' idle
+  timeout, and re-calling just waits on the same background poll. A 408 is *not* retried: that one
+  means nobody approved.
+- **The biometric gate fails open** when the device has no enrolled biometrics — including Expo Go
+  on iOS, where Face ID needs a development build. A phone that cannot show the prompt must still be
+  able to submit; the gate is a second lock on top of the device's own, not what makes the
+  credentials safe.
+
+Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
+keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"
+is what clears them.
+
+## The learner ID on this screen
+
+`profile-api.ts` calls `GET /auth/me` → `{username, learnerId}` and `PATCH /auth/me` taking
+`{learnerId}`. Both are on `staging`, landed as otjServices #32, with `learner-id-api-spec.md`
+alongside them explaining the shape. Note that `add-learner-id-endpoint` is still an open PR over
+there and is a stale duplicate of that merge — check `origin/staging` itself rather than reading
+an open branch as "not landed yet".
+
+Server-side they are on their own `AccountResource`, not `AuthResource` — that class is
+deliberately un-`@Authenticated` and the annotation binds per class.
+
+It lives on Submit rather than in a settings screen because a wrong learner ID has exactly one
+symptom — OneAdvanced rejecting every row — and this is the screen you are on when that happens.
+There is no settings screen to move it to.
+
+Three things not to undo:
+
+- **Editing is inline, not a `Modal`.** One short field does not earn a sheet, and staying on the
+  screen is what keeps the queued-rows note visible while the field is open. That also sidesteps
+  the whole `SafeAreaProvider`-inside-`Modal` problem the composer documents.
+- **`learnerDraft === null` is the display state; `""` is an open, empty field.** Clearing the box
+  on the way to retyping must not collapse the card, so "is the editor open" cannot be `!draft`.
+- **A correction *does* reach rows already in Pending — the note says so, and it is reassurance
+  rather than a warning.** The server copies `learnerId` onto each row as it is written and never
+  rewrites those copies, so the obvious guess is that queued rows post under the old value. They do
+  not: submission is handed the learner ID read off the account at submit time. This screen said the
+  opposite until 2026-08-16, which told people to delete and retype work that would have posted
+  fine. Don't restore that. A back-fill of the stored copies is deliberately not done, so a row's
+  own `learnerId` can differ from the one it posts under; nothing in this app shows that copy.
+
+Unlike the OneAdvanced credentials, this is server-side account data: nothing about it is stored on
+the device, and it is read back through react-query under `profileKey`.
 
 # Checks
 
