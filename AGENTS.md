@@ -121,8 +121,10 @@ be outermost and `flex: 1`, or gestures below it never fire.
 lib/oa-credentials.ts           the OneAdvanced username/password + remembered route, on-device only
 lib/biometric.ts                the Face ID / fingerprint gate
 lib/submit-api.ts               prepare + complete for both routes, and SubmitOutcome
+lib/profile-api.ts              GET/PATCH /auth/me — the account, for the learner ID
 components/credentials-sheet.tsx  where the credentials are entered, changed and forgotten
-app/(tabs)/submit.tsx           route picker, the button, the challenge number, the code field
+app/(tabs)/submit.tsx           route picker, the button, the challenge number, the code field,
+                                and the learner ID card
 ```
 
 **The two prepare endpoints answer 501 today.** Backend step 05 — OneAdvanced credentials in
@@ -162,6 +164,34 @@ Things not to undo:
 Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
 keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"
 is what clears them.
+
+## The learner ID on this screen
+
+`profile-api.ts` calls `GET /auth/me` → `{username, learnerId}` and `PATCH /auth/me` taking
+`{learnerId}`. **They are not on `staging` yet** — they live on `add-learner-id-endpoint` in
+`../otjServices`, implemented and green, alongside the `learner-id-api-spec.md` that explains the
+shape. Against `staging` they 404. Unlike the 501s above, this is only a merge away.
+
+Server-side they are on their own `AccountResource`, not `AuthResource` — that class is
+deliberately un-`@Authenticated` and the annotation binds per class.
+
+It lives on Submit rather than in a settings screen because a wrong learner ID has exactly one
+symptom — OneAdvanced rejecting every row — and this is the screen you are on when that happens.
+There is no settings screen to move it to.
+
+Three things not to undo:
+
+- **Editing is inline, not a `Modal`.** One short field does not earn a sheet, and staying on the
+  screen is what keeps the queued-rows warning visible while the field is open. That also sidesteps
+  the whole `SafeAreaProvider`-inside-`Modal` problem the composer documents.
+- **`learnerDraft === null` is the display state; `""` is an open, empty field.** Clearing the box
+  on the way to retyping must not collapse the card, so "is the editor open" cannot be `!draft`.
+- **A correction does not reach rows already in Pending.** The server copies `learnerId` onto each
+  row as it is written, so queued rows post under the old value. The editor says so, with the count
+  — don't drop that text unless the backend grows a back-fill.
+
+Unlike the OneAdvanced credentials, this is server-side account data: nothing about it is stored on
+the device, and it is read back through react-query under `profileKey`.
 
 # Checks
 

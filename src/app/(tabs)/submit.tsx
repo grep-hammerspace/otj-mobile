@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,6 +23,7 @@ import {
   type OaCredentials,
 } from "../../lib/oa-credentials";
 import { formatTotalMinutes, getPending, pendingKey } from "../../lib/pending-api";
+import { getProfile, profileKey, updateLearnerId, type Profile } from "../../lib/profile-api";
 import {
   completeAzure,
   describeOutcome,
@@ -44,6 +45,10 @@ import {
  * <p>The two routes differ in where the second factor is answered — on the phone's push for Azure,
  * in a field here for OneAdvanced's own login — so the screen has two shapes below the button, and
  * `phase` is what says which.
+ *
+ * <p>The learner ID sits here too, even though it is account data rather than a submit setting.
+ * It is typed once at signup and never shown again, so a typo in it is invisible until OneAdvanced
+ * rejects the rows — and this is the screen the user is on when that happens.
  */
 
 /**
@@ -80,6 +85,10 @@ export default function Submit() {
   const [mfaCode, setMfaCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
 
+  /** The draft learner ID while the card is open for editing, or null while it is just displaying. */
+  const [learnerDraft, setLearnerDraft] = useState<string | null>(null);
+  const [learnerError, setLearnerError] = useState<string | null>(null);
+
   useEffect(() => {
     Promise.all([getCredentials(), getDriverChoice()]).then(([stored, choice]) => {
       setCreds(stored);
@@ -93,6 +102,31 @@ export default function Submit() {
    * count is no reason to block a submit, and the Pending tab is where a broken queue gets reported.
    */
   const queued = useQuery({ queryKey: pendingKey, queryFn: getPending });
+
+  /**
+   * The account, for the learner ID. Its failure *is* reported, unlike `queued`'s: the card would
+   * otherwise show an empty box that looks like an unset learner ID, and someone would retype a
+   * value that was already correct.
+   */
+  const profile = useQuery({ queryKey: profileKey, queryFn: getProfile });
+
+  /**
+   * Lives on the screen rather than inside the card so a slow save cannot be abandoned halfway by
+   * the card closing — the same reason the Pending tab holds its edit mutation outside the sheet.
+   */
+  const saveLearner = useMutation({
+    mutationFn: updateLearnerId,
+    onSuccess: (updated) => {
+      // Written straight into the cache rather than waiting on the refetch, so the card shows the
+      // new value as it collapses instead of flashing the old one.
+      queryClient.setQueryData<Profile>(profileKey, updated);
+      setLearnerDraft(null);
+      setLearnerError(null);
+    },
+    onError: (e) =>
+      setLearnerError(e instanceof Error ? e.message : "Could not save your learner ID."),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: profileKey }),
+  });
 
   const running =
     phase.name === "preparing" || phase.name === "awaitingApproval" || phase.name === "submitting";
@@ -235,6 +269,32 @@ export default function Submit() {
     }
   };
 
+  const openLearnerEditor = () => {
+    saveLearner.reset();
+    setLearnerError(null);
+    setLearnerDraft(profile.data?.learnerId ?? "");
+  };
+
+  const cancelLearnerEditor = () => {
+    setLearnerDraft(null);
+    setLearnerError(null);
+  };
+
+  const commitLearnerId = () => {
+    const next = (learnerDraft ?? "").trim();
+    if (!next) {
+      setLearnerError("Enter your learner ID.");
+      return;
+    }
+    // Nothing to send, so don't send it — a no-op PATCH would still refetch and still be a chance
+    // for the request to fail, and "save" on an unchanged field should just close the card.
+    if (next === profile.data?.learnerId) {
+      cancelLearnerEditor();
+      return;
+    }
+    saveLearner.mutate(next);
+  };
+
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -300,6 +360,25 @@ export default function Submit() {
             <Text style={styles.credsButtonText}>{creds ? "Edit" : "Add"}</Text>
           </Pressable>
         </View>
+
+        <Text style={styles.sectionLabel}>Learner ID</Text>
+        <LearnerIdCard
+          profile={profile.data}
+          loading={profile.isPending}
+          loadError={profile.isError}
+          draft={learnerDraft}
+          error={learnerError}
+          busy={saveLearner.isPending}
+          queuedCount={queued.data?.count ?? 0}
+          onEdit={openLearnerEditor}
+          onChangeDraft={(text) => {
+            setLearnerDraft(text);
+            if (learnerError) setLearnerError(null);
+          }}
+          onCancel={cancelLearnerEditor}
+          onSave={commitLearnerId}
+          onRetry={() => profile.refetch()}
+        />
 
         <Pressable
           accessibilityRole="button"
@@ -388,6 +467,158 @@ function DriverChoiceButton({
       </Text>
       <Text style={styles.choiceDetail}>{detail}</Text>
     </Pressable>
+  );
+}
+
+/**
+ * The learner ID, and the one place it can be corrected after signup.
+ *
+ * <p>Edits inline rather than in a `Modal` like `CredentialsSheet`: one short field does not earn a
+ * sheet, and staying on the screen keeps the "already queued" warning visible while it is being
+ * changed — that warning is the whole reason the correction is not just a text box.
+ *
+ * <p>`draft === null` is the display state; a string, including `""`, means the field is open. That
+ * distinction matters because clearing the field is a thing a user does on the way to retyping,
+ * and it must not collapse the card.
+ */
+function LearnerIdCard({
+  profile,
+  loading,
+  loadError,
+  draft,
+  error,
+  busy,
+  queuedCount,
+  onEdit,
+  onChangeDraft,
+  onCancel,
+  onSave,
+  onRetry,
+}: {
+  profile: Profile | undefined;
+  loading: boolean;
+  loadError: boolean;
+  draft: string | null;
+  error: string | null;
+  busy: boolean;
+  queuedCount: number;
+  onEdit: () => void;
+  onChangeDraft: (text: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return (
+      <View style={styles.credsCard}>
+        <View style={styles.credsText}>
+          <Text style={styles.credsPlaceholder}>Checking your account…</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Not silently blank: an empty-looking card reads as "no learner ID set" and invites someone to
+  // retype a value that is fine. Offer the retry instead.
+  if (loadError || !profile) {
+    return (
+      <View style={styles.credsCard}>
+        <View style={styles.credsText}>
+          <Text style={styles.credsUser}>Learner ID unavailable</Text>
+          <Text style={styles.credsPlaceholder}>Could not read it from the server.</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading your learner ID"
+          onPress={onRetry}
+          style={({ pressed }) => [styles.credsButton, pressed ? styles.pressed : null]}
+        >
+          <Text style={styles.credsButtonText}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (draft === null) {
+    return (
+      <View style={styles.credsCard}>
+        <View style={styles.credsText}>
+          <Text style={styles.credsUser} numberOfLines={1}>
+            {profile.learnerId}
+          </Text>
+          <Text style={styles.credsPlaceholder}>Sent with every activity you log</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Change your learner ID"
+          onPress={onEdit}
+          style={({ pressed }) => [styles.credsButton, pressed ? styles.pressed : null]}
+        >
+          <Text style={styles.credsButtonText}>Change</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.learnerEditor}>
+      <TextInput
+        style={[styles.learnerInput, error ? styles.codeInputInvalid : null]}
+        value={draft}
+        onChangeText={onChangeDraft}
+        placeholder="Your OneAdvanced learner ID"
+        placeholderTextColor="#9ca3af"
+        autoCapitalize="characters"
+        autoCorrect={false}
+        autoFocus
+        editable={!busy}
+        returnKeyType="done"
+        onSubmitEditing={onSave}
+        accessibilityLabel="Learner ID"
+      />
+      {error ? <Text style={styles.codeError}>{error}</Text> : null}
+
+      {/* The correction is copied onto rows as they are created, so it cannot reach rows that
+          already exist. Said here, before the save, rather than left to be discovered when
+          OneAdvanced rejects them. */}
+      {queuedCount > 0 ? (
+        <Text style={styles.learnerNote}>
+          {queuedCount === 1 ? "The 1 activity" : `The ${queuedCount} activities`} already in Pending
+          will still be sent under the old ID. Delete and re-add {queuedCount === 1 ? "it" : "them"}{" "}
+          if that matters.
+        </Text>
+      ) : null}
+
+      <View style={styles.learnerActions}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onCancel}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.credsButton,
+            styles.learnerAction,
+            pressed ? styles.pressed : null,
+            busy ? styles.credsButtonInactive : null,
+          ]}
+        >
+          <Text style={styles.credsButtonText}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy, busy }}
+          onPress={onSave}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.codeButton,
+            styles.learnerAction,
+            pressed && !busy ? styles.codeButtonPressed : null,
+            busy ? styles.credsButtonInactive : null,
+          ]}
+        >
+          <Text style={styles.codeButtonText}>{busy ? "Saving…" : "Save"}</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -611,6 +842,38 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.6,
+  },
+  learnerEditor: {
+    gap: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+  },
+  learnerInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: "#111827",
+    backgroundColor: "#ffffff",
+  },
+  learnerNote: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#92400e",
+  },
+  learnerActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  learnerAction: {
+    flex: 1,
+    minHeight: 48,
   },
   submitButton: {
     marginTop: 12,
