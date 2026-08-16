@@ -578,14 +578,15 @@ function LearnerIdCard({
       />
       {error ? <Text style={styles.codeError}>{error}</Text> : null}
 
-      {/* The correction is copied onto rows as they are created, so it cannot reach rows that
-          already exist. Said here, before the save, rather than left to be discovered when
-          OneAdvanced rejects them. */}
+      {/* Reassurance, not a warning. Submission reads the account's current learner ID rather than
+          the copy stored on each row, so a correction reaches everything still queued. Worth saying
+          out loud: the obvious guess is the opposite, and acting on that guess means deleting and
+          retyping work that would have posted fine. */}
       {queuedCount > 0 ? (
         <Text style={styles.learnerNote}>
           {queuedCount === 1 ? "The 1 activity" : `The ${queuedCount} activities`} already in Pending
-          will still be sent under the old ID. Delete and re-add {queuedCount === 1 ? "it" : "them"}{" "}
-          if that matters.
+          will be sent under the corrected ID too — there is no need to delete and re-add{" "}
+          {queuedCount === 1 ? "it" : "them"}.
         </Text>
       ) : null}
 

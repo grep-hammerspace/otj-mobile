@@ -127,12 +127,20 @@ app/(tabs)/submit.tsx           route picker, the button, the challenge number, 
                                 and the learner ID card
 ```
 
-**The two prepare endpoints answer 501 today.** Backend step 05 — OneAdvanced credentials in
-request bodies rather than stored server-side — has not landed, so `/prepare-browser` and
-`/azure-id/prepare` are stubs and a run ends with the 501's message on screen. The request shapes
-the client sends are step 05's own (`steps-04-08-implementation-plan.md` §05.1–05.2 in
-`../otjServices`); the response shapes are what the pre-501 code at `51bd46c` actually returned.
-Build against those, not mocks.
+**All four endpoints are live on `staging`.** Backend step 05 — OneAdvanced credentials in request
+bodies rather than stored server-side — landed as otjServices #33, and the two prepare endpoints
+stopped being 501 stubs with it.
+
+Read the shipped records, not `steps-04-08-implementation-plan.md`. The plan called the credential
+fields `oneAdvancedUsername` / `oneAdvancedPassword`; what shipped is
+`OneAdvancedCredentials(String username, String password)`, and this client sent the plan's names
+until it was checked against `staging`. That mistake is invisible from the client side — Jackson
+drops unknown keys, so both fields arrive null and the call comes back 400 "credentials missing",
+which looks exactly like a wrong OneAdvanced password. Two other outcomes are worth knowing before
+reading a failure as a bug: a failed login is **401** with a deliberately generic message (the
+driver's own text leaks the username through `login_hint` URLs), and an account with no learner ID
+is **409**, checked before the login so the Azure route cannot make someone approve a push and wait
+two minutes for nothing.
 
 Two routes, two calls each, and they are alternatives rather than steps — an account gets in one
 way or the other:
@@ -168,9 +176,10 @@ is what clears them.
 ## The learner ID on this screen
 
 `profile-api.ts` calls `GET /auth/me` → `{username, learnerId}` and `PATCH /auth/me` taking
-`{learnerId}`. **They are not on `staging` yet** — they live on `add-learner-id-endpoint` in
-`../otjServices`, implemented and green, alongside the `learner-id-api-spec.md` that explains the
-shape. Against `staging` they 404. Unlike the 501s above, this is only a merge away.
+`{learnerId}`. Both are on `staging`, landed as otjServices #32, with `learner-id-api-spec.md`
+alongside them explaining the shape. Note that `add-learner-id-endpoint` is still an open PR over
+there and is a stale duplicate of that merge — check `origin/staging` itself rather than reading
+an open branch as "not landed yet".
 
 Server-side they are on their own `AccountResource`, not `AuthResource` — that class is
 deliberately un-`@Authenticated` and the annotation binds per class.
@@ -182,13 +191,17 @@ There is no settings screen to move it to.
 Three things not to undo:
 
 - **Editing is inline, not a `Modal`.** One short field does not earn a sheet, and staying on the
-  screen is what keeps the queued-rows warning visible while the field is open. That also sidesteps
+  screen is what keeps the queued-rows note visible while the field is open. That also sidesteps
   the whole `SafeAreaProvider`-inside-`Modal` problem the composer documents.
 - **`learnerDraft === null` is the display state; `""` is an open, empty field.** Clearing the box
   on the way to retyping must not collapse the card, so "is the editor open" cannot be `!draft`.
-- **A correction does not reach rows already in Pending.** The server copies `learnerId` onto each
-  row as it is written, so queued rows post under the old value. The editor says so, with the count
-  — don't drop that text unless the backend grows a back-fill.
+- **A correction *does* reach rows already in Pending — the note says so, and it is reassurance
+  rather than a warning.** The server copies `learnerId` onto each row as it is written and never
+  rewrites those copies, so the obvious guess is that queued rows post under the old value. They do
+  not: submission is handed the learner ID read off the account at submit time. This screen said the
+  opposite until 2026-08-16, which told people to delete and retype work that would have posted
+  fine. Don't restore that. A back-fill of the stored copies is deliberately not done, so a row's
+  own `learnerId` can differ from the one it posts under; nothing in this app shows that copy.
 
 Unlike the OneAdvanced credentials, this is server-side account data: nothing about it is stored on
 the device, and it is read back through react-query under `profileKey`.

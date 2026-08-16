@@ -21,12 +21,14 @@ import type { OaCredentials } from "./oa-credentials";
  * <p>Submitting is the last step of <i>both</i> second calls — there is no separate "now post"
  * endpoint. A login that succeeds and posts nothing is `nothing_to_post`, not a failure.
  *
- * <p><b>These endpoints answer 501 on staging today.</b> `/prepare-browser` and
- * `/azure-id/prepare` were turned into stubs when OneAdvanced credentials stopped being stored
- * server-side, and the step-05 work that reinstates them as POSTs taking credentials in the body
- * has not landed. The request shapes below are that plan's (`steps-04-08-implementation-plan.md`,
- * §05.1–05.2 in the otjServices repo); the response shapes are the ones the pre-501 code actually
- * returned. Until it ships, a submit run ends with the 501's own message on screen.
+ * <p>All four are live on `staging`. The step-05 work that reinstated the two prepare endpoints as
+ * POSTs taking credentials in the body — rather than reading a copy stored server-side — landed as
+ * otjServices #33, and the learner ID endpoints these run against landed as #32. The shapes below
+ * are the ones that shipped, read off `OneAdvancedCredentials`, `PrepareResponse` and
+ * `SubmitWithMfaRequest`, not the ones `steps-04-08-implementation-plan.md` §05.1–05.2 proposed:
+ * the plan named the credential fields `oneAdvancedUsername` / `oneAdvancedPassword` and the
+ * implementation did not. Sending those names is not a type error and not a 404 — it deserialises
+ * to two nulls and comes back 400 "credentials missing", which reads like a rejected password.
  */
 
 /** What `POST /azure-id/prepare` answers. `challengeNumber` is present only for number matching. */
@@ -50,18 +52,32 @@ export type SubmitOutcome =
   | { kind: "partial"; posted: number; failed: number }
   | { kind: "failed"; failed: number };
 
+/**
+ * The body both prepare calls take: `OneAdvancedCredentials(String username, String password)`.
+ *
+ * <p>Plain `username` / `password`, deliberately — the server's record has no OneAdvanced prefix on
+ * its components, and Jackson matches on the component names. The prefixed names the step-05 plan
+ * used are the one wrong guess here that fails silently: unknown keys are ignored, both fields
+ * arrive null, and `prepare()` answers 400 before opening a browser.
+ */
 const CREDS_BODY = (creds: OaCredentials) =>
   JSON.stringify({
-    oneAdvancedUsername: creds.username,
-    oneAdvancedPassword: creds.password,
+    username: creds.username,
+    password: creds.password,
   });
 
 /**
  * Starts the Azure AD login and sends the Microsoft Authenticator push.
  *
  * <p>Returns as soon as the push is out — the server then polls Microsoft in the background, which
- * is what `completeAzure` waits on. Answers 400 with the driver's own message when the login itself
- * fails (a wrong password, a changed login page), and that message is worth showing verbatim.
+ * is what `completeAzure` waits on.
+ *
+ * <p>Two failures share this shape with `prepareBrowser`, and neither is the driver's own message:
+ * a login that fails is **401** with a deliberately generic one, because the driver's text embeds
+ * login-chain URLs that carry the username in `login_hint`; an account with no learner ID is
+ * **409**, checked before the login precisely so this route does not make the user approve a push
+ * and wait two minutes only to find there is nothing to post under. Both arrive as an `ApiError`
+ * whose message is worth showing verbatim.
  */
 export async function prepareAzure(creds: OaCredentials): Promise<AzurePrepare> {
   return apiJson<AzurePrepare>("/otj-services/azure-id/prepare", {
@@ -99,9 +115,10 @@ export async function completeAzure(attempts = 3): Promise<SubmitOutcome> {
 /**
  * Logs in far enough to reach the TOTP field and leaves the session open there.
  *
- * <p>Answers `{"status": "ready"}`, which carries no information the caller does not already have,
- * so the return is `void`: reaching here without throwing *is* the result. The code the user is
- * about to type expires in about 30 s, so the field wants to be on screen the moment this resolves.
+ * <p>Answers `{"status": "otp_required"}`, which carries no information the caller does not already
+ * have, so the return is `void`: reaching here without throwing *is* the result. The code the user
+ * is about to type expires in about 30 s, so the field wants to be on screen the moment this
+ * resolves. The 401 and 409 described on `prepareAzure` apply here too.
  */
 export async function prepareBrowser(creds: OaCredentials): Promise<void> {
   await apiJson<{ status: string }>("/otj-services/prepare-browser", {

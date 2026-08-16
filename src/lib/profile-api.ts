@@ -3,10 +3,10 @@ import { apiJson } from "./api";
 /**
  * The signed-in account itself — `GET /auth/me` and `PATCH /auth/me`.
  *
- * <p><b>Neither endpoint is on the backend's `staging` yet.</b> Both are implemented on
- * `add-learner-id-endpoint` in `../otjServices`, against the contract in `learner-id-api-spec.md`
- * there; until that merges, these calls 404. Unlike `submit-api.ts`'s two 501s, nothing here is
- * waiting on unwritten code.
+ * <p>Both are on the backend's `staging`, landed as otjServices #32 against the contract in
+ * `learner-id-api-spec.md`. Server-side they sit on their own `AccountResource` rather than
+ * `AuthResource`, because that class is deliberately un-`@Authenticated` and the annotation binds
+ * per class.
  *
  * <p>Separate from `auth-api.ts` on purpose. That file is the three anonymous calls you make
  * *around* a token; these two are authenticated reads and writes of the account behind one, and
@@ -40,10 +40,15 @@ export async function getProfile(): Promise<Profile> {
  * user's to change here and `password` has no business in this shape, so there is nothing else a
  * full replacement could carry.
  *
- * <p><b>This does not touch rows already written.</b> `learnerId` is copied onto every activity log
- * row when the row is created, so a correction applies to what is logged next, not to what is
- * already queued. Anything sitting in Pending still carries the old value and will post under it —
- * which is why the card says so rather than leaving the user to find out from OneAdvanced.
+ * <p><b>A correction does reach rows already queued.</b> `learnerId` is copied onto every activity
+ * log row as the row is created and those copies are left alone, so the stored value records what
+ * was intended at the time. But submission does not read them: `Driver#submitPendingOtjs` is handed
+ * the learner ID looked up on the account at submit time, so everything in Pending posts under the
+ * corrected one. Without that, a typo noticed after logging could not be repaired at all.
+ *
+ * <p>A true back-fill, rewriting the stored rows, is deliberately not done — so a row's own copy
+ * and the value it posts under can differ, and it is the row's copy that is out of date. Nothing in
+ * this app shows that copy, so the distinction stays invisible to the user.
  *
  * <p>Trimmed here as well as server-side because the server stores `learnerId` verbatim and the
  * drivers `strip()` it only on the way out; a trailing space saved now is a mismatch that survives
