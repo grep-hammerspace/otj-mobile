@@ -222,12 +222,19 @@ function PendingItem({
       overshootRight={false}
       enabled={!deleting}
       /*
-        `direction` names the side whose actions are opening, so a rightward drag reports "left".
+        `direction` names the way the row was dragged, *not* the side whose actions that reveals —
+        `ReanimatedSwipeable` passes `toValue > 0 ? RIGHT : LEFT`, and a positive offset is a
+        rightward drag, which uncovers the left actions. So the edit gesture is "right" even though
+        it opens `renderLeftActions`. This read "left" until 2026-08-16, which inverted both
+        gestures: a leftward drag opened the sheet instead of holding Delete, and a rightward one
+        parked on an Edit label that does nothing. Note `onSwipeableWillClose` uses the opposite
+        convention in the same file upstream — don't reason from one to the other.
+
         Acting on WillOpen rather than Open, and closing the row immediately, is what makes the
         gesture feel like it opened the sheet — the row never comes to rest in the open position.
       */
       onSwipeableWillOpen={(direction) => {
-        if (direction !== "left") return;
+        if (direction !== "right") return;
         swipeable.current?.close();
         onEdit();
       }}
