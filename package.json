@@ -35,7 +35,7 @@
   },
   "scripts": {
     "start": "expo start --port 8082",
-    "start:tailnet": "REACT_NATIVE_PACKAGER_HOSTNAME=100.123.154.21 expo start --port 8082",
+    "start:tailnet": "bash scripts/start-tailnet.sh",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
