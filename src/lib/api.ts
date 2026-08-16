@@ -70,8 +70,12 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
  * Prefers the server's own `{"error": "..."}` message — those are written to be shown to a
  * person, and are the only place that knows *why* something was refused. Bean-validation
  * failures don't use that shape, hence the per-status fallbacks.
+ *
+ * <p>Exported for `submit-api.ts`, which reads some non-2xx bodies itself — the submit endpoints
+ * answer 502 with a `{"status": "all_failed"}` body that is a real outcome rather than a fault,
+ * and it still needs this ladder for every other status.
  */
-function errorMessage(status: number, body: string): string {
+export function errorMessage(status: number, body: string): string {
   try {
     const parsed = JSON.parse(body);
     if (typeof parsed?.error === "string" && parsed.error.length > 0) return parsed.error;
