@@ -238,13 +238,24 @@ function PendingItem({
         swipeable.current?.close();
         onEdit();
       }}
-      /* Never tapped — the drag itself opens the sheet. It exists so the gesture has an
-         affordance while it is in progress, and because the left side must render something for
-         the rightward drag to be enabled at all. */
-      renderLeftActions={() => (
-        <View style={styles.editAction} pointerEvents="none">
+      /* Tappable, not just an affordance. The drag alone is meant to open the sheet via
+         `onSwipeableWillOpen` above, and when that fires this panel is gone before it can be
+         pressed. But a label that looks like a button and ignores presses is the worst outcome if
+         that callback ever reports a direction we did not expect — which is exactly what the
+         inverted check produced. Wiring the press makes the gesture degrade to "swipe, then tap"
+         instead of to nothing, and costs one handler. */
+      renderLeftActions={(_progress, _translation, swipeable: SwipeableMethods) => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Edit activity: ${row.activityImpact}`}
+          onPress={() => {
+            swipeable.close();
+            onEdit();
+          }}
+          style={({ pressed }) => [styles.editAction, pressed ? styles.editActionPressed : null]}
+        >
           <Text style={styles.editActionText}>Edit</Text>
-        </View>
+        </Pressable>
       )}
       renderRightActions={(_progress, _translation, swipeable: SwipeableMethods) => (
         <Pressable
@@ -366,6 +377,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#208AEF",
     alignItems: "center",
     justifyContent: "center",
+  },
+  editActionPressed: {
+    backgroundColor: "#1668b8",
   },
   editActionText: {
     color: "#ffffff",
