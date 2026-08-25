@@ -8,6 +8,13 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /**
+     * The server's machine-readable `code`, when it sent one. Only the sealed-credential
+     * failures use it today, and only `unknown_key` is acted on — `submit-api.ts` re-fetches the
+     * server key and seals again rather than showing the user a message about a key rotation
+     * they had no part in. Everything else is still handled by reading `message`.
+     */
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -56,13 +63,23 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
   const res = await api(path, init);
   const body = await res.text();
 
-  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, body));
+  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, body), errorCode(body));
   if (!body) return undefined as T;
 
   try {
     return JSON.parse(body) as T;
   } catch {
     throw new ApiError(res.status, "The server sent a response the app could not read.");
+  }
+}
+
+/** The server's `code`, if the body carried one. Absent on every endpoint that does not set it. */
+export function errorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body);
+    return typeof parsed?.code === "string" ? parsed.code : undefined;
+  } catch {
+    return undefined;
   }
 }
 
