@@ -119,6 +119,7 @@ be outermost and `flex: 1`, or gestures below it never fire.
 
 ```
 lib/oa-credentials.ts           the OneAdvanced username/password + remembered route, on-device only
+lib/credential-seal.ts          encrypts that pair to the backend, and pins the key it seals to
 lib/biometric.ts                the Face ID / fingerprint gate
 lib/submit-api.ts               prepare + complete for both routes, and SubmitOutcome
 lib/profile-api.ts              GET/PATCH /auth/me — the account, for the learner ID
@@ -172,6 +173,56 @@ Things not to undo:
 Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
 keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"
 is what clears them.
+
+## The credentials are encrypted before they leave the phone
+
+`EXPO_PUBLIC_API_URL` points at `https://otj-services.com`, which is **proxied by Cloudflare**. The
+TLS the phone negotiates ends at a Cloudflare edge node, which opens its own connection to the
+origin. Everything in a request body is plaintext inside that hop. For the bearer token that is a
+nuisance; for the OneAdvanced password — the user's real institutional credential, which this
+project goes out of its way not to store anywhere — it is the wrong place to leave a copy.
+
+So `credential-seal.ts` seals the pair before `submit-api.ts` sends it, and the backend accepts
+nothing else. `credential-encryption-spec.md` in `../otjServices` is the wire format, and it is the
+contract: the two sides are separate implementations (`@noble/*` here, the JDK there) and neither
+is the source of truth.
+
+```
+X25519 ephemeral → HKDF-SHA256 → ChaCha20-Poly1305 over {username, password, iat}
+```
+
+Four things not to undo:
+
+- **The pinned identity key is the entire point.** The key to seal to is fetched from
+  `GET /otj-services/crypto/public-key` — over the same Cloudflare hop. A client that trusted what
+  came back would be defended against an edge that *reads* and not at all against one that
+  *answers*. The backend signs its announcement with a long-lived Ed25519 key; this app carries the
+  public half as `EXPO_PUBLIC_CREDENTIAL_IDENTITY_KEY` and **refuses to submit** when the signature
+  does not verify. Every check in `verify()` ends the submit rather than degrading it. Do not add a
+  plaintext fallback, a "trust this key" prompt, or a retry that skips the check — a fallback is a
+  downgrade attack with extra steps.
+- **`EXPO_PUBLIC_CREDENTIAL_IDENTITY_KEY` has no default and throws when unset**, exactly like
+  `EXPO_PUBLIC_API_URL` in `api.ts`. It must be the pair of the backend's
+  `CREDENTIAL_IDENTITY_SEED`; `IdentityKeyTool generate` over there prints both halves together.
+  A mismatch is not a subtle bug — every submit fails with the "could not prove it is the one this
+  app was built for" banner.
+- **Pure JavaScript, deliberately.** React Native has no WebCrypto, and a native crypto module
+  would need a development build — which this project cannot have, since SDK 54 is pinned so the
+  app runs in Expo Go on iOS. `@noble/*` is audited and dependency-free. Randomness comes from
+  `expo-crypto`'s `getRandomBytesAsync`, **not** `getRandomBytes`: the sync one is documented as
+  falling back to `Math.random` in development, and a guessable ephemeral key would hand over the
+  whole conversation.
+- **The MFA code is not sealed.** A TOTP is six digits with about thirty seconds of life; a copy
+  taken at the edge is worthless before anyone could use it, while sealing it would put a key fetch
+  in front of the most time-critical call in the app.
+
+`unknown_key` is the one server error `submit-api.ts` acts on rather than shows: the backend
+restarted between the key fetch and the request, so it forgets the cached key, re-seals and sends
+again — once. Retrying forever is how a submit loop becomes a login-attempt flood against
+OneAdvanced.
+
+The cached announcement lives in module memory and is never persisted. It is one small request per
+app session, and a stored copy would have to be re-verified anyway.
 
 ## The learner ID on this screen
 

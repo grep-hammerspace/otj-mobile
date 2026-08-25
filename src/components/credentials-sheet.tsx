@@ -136,7 +136,8 @@ function CredentialsBody({
         <Text style={styles.blurb}>
           These are your real OneAdvanced credentials — the ones you use on the website, not the
           ones you use to sign in to this app. They are kept in this phone&apos;s encrypted storage
-          and sent to the server only while a submission is running.
+          and sent only while a submission is running, encrypted so that only the OTJ server itself
+          can read them.
         </Text>
 
         <View style={styles.field}>
