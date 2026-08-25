@@ -133,6 +133,7 @@ don't reason from one callback to the other — read the source.
 
 ```
 lib/oa-credentials.ts           the OneAdvanced username/password + remembered route, on-device only
+lib/credential-seal.ts          encrypts that pair to the backend, and pins the key it seals to
 lib/biometric.ts                the Face ID / fingerprint gate
 lib/submit-api.ts               prepare + complete for both routes, and SubmitOutcome
 lib/profile-api.ts              GET/PATCH /auth/me — the account, for the learner ID
@@ -186,6 +187,29 @@ Things not to undo:
 Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
 keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"
 is what clears them.
+
+## The credentials are encrypted before they leave the phone
+
+The API sits behind Cloudflare, which terminates TLS, so a request body is plaintext inside it.
+`credential-seal.ts` seals the OneAdvanced pair to the backend process before `submit-api.ts` sends
+it, and the backend accepts nothing else. The wire format is `credential-encryption-spec.md` in
+`../otjServices`; the two sides are separate implementations, so change the spec first.
+
+Things not to undo:
+
+- **The pinned identity key is the point.** The key to seal to comes over the same Cloudflare hop,
+  so its announcement must verify against `EXPO_PUBLIC_CREDENTIAL_IDENTITY_KEY` or the submit
+  stops. No plaintext fallback, no "trust this key" prompt, no retry that skips the check.
+- **`EXPO_PUBLIC_CREDENTIAL_IDENTITY_KEY` has no default and throws when unset**, like
+  `EXPO_PUBLIC_API_URL`. It is the pair of the backend's `CREDENTIAL_IDENTITY_SEED`;
+  `IdentityKeyTool generate` prints both.
+- **Pure JS (`@noble/*`)**, since Expo Go allows no native crypto module. Randomness is
+  `expo-crypto`'s `getRandomBytesAsync`, not the sync `getRandomBytes`, which can fall back to
+  `Math.random` in development.
+- **`unknown_key` is re-sealed once, never more.** It means the backend restarted after the key
+  fetch; unbounded retries would turn a submit loop into a login flood against OneAdvanced.
+
+The MFA code is not sealed (it dies in ~30 s), and the verified key is cached in memory only.
 
 ## The learner ID on this screen
 

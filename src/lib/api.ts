@@ -8,6 +8,7 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -56,13 +57,22 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
   const res = await api(path, init);
   const body = await res.text();
 
-  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, body));
+  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, body), errorCode(body));
   if (!body) return undefined as T;
 
   try {
     return JSON.parse(body) as T;
   } catch {
     throw new ApiError(res.status, "The server sent a response the app could not read.");
+  }
+}
+
+export function errorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body);
+    return typeof parsed?.code === "string" ? parsed.code : undefined;
+  } catch {
+    return undefined;
   }
 }
 
