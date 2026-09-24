@@ -58,7 +58,7 @@ lib/pending-api.ts                GET /pending + DELETE /pending/{id}
 components/activity-composer.tsx  the "Add activities" sheet
 components/result-banner.tsx      red / amber / green outcome box
 app/(tabs)/index.tsx              Log screen: the big button + the last outcome
-app/(tabs)/pending.tsx            the unposted queue: list + swipe-to-delete
+app/(tabs)/pending.tsx            the unposted queue: list, swipe-right to edit, swipe-left to delete
 ```
 
 `ActivityRow` lives in `activities-api.ts` and is the row shape for **both** endpoints — the
@@ -114,6 +114,20 @@ rather than reporting a failure.
 
 `_layout.tsx` wraps the app in `GestureHandlerRootView` because of this screen's swipe. It has to
 be outermost and `flex: 1`, or gestures below it never fire.
+
+## The two swipes
+
+Drag a row **right** to edit it, **left** to uncover Delete. They are deliberately asymmetric:
+edit takes one step because a sheet you can close costs nothing, while delete takes two because
+the backend deletes for real and there is no undo.
+
+`ReanimatedSwipeable`'s `direction` argument is the trap here. **It names the way the row was
+dragged, not the side whose actions that uncovers** — the source passes `toValue > 0 ? RIGHT :
+LEFT`, and a rightward drag uncovers `renderLeftActions`. So the edit branch tests for `"right"`
+while rendering into the *left* actions, which reads backwards and is correct. Getting it wrong
+does not fail loudly: both gestures keep working, they just swap jobs, and the Delete side becomes
+a shortcut into the edit sheet. `onSwipeableWillClose` uses the opposite convention upstream, so
+don't reason from one callback to the other — read the source.
 
 # Submitting to OneAdvanced
 
