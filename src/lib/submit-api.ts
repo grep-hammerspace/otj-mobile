@@ -1,4 +1,5 @@
 import { ApiError, NetworkError, api, apiJson, errorMessage } from "./api";
+import { forgetServerKey, sealCredentials } from "./credential-seal";
 import type { OaCredentials } from "./oa-credentials";
 
 /**
@@ -20,6 +21,9 @@ import type { OaCredentials } from "./oa-credentials";
  *
  * <p>Submitting is the last step of <i>both</i> second calls — there is no separate "now post"
  * endpoint. A login that succeeds and posts nothing is `nothing_to_post`, not a failure.
+ *
+ * <p>Both prepare calls send the credentials sealed by `credential-seal.ts`; the backend accepts
+ * nothing else.
  *
  * <p>All four are live on `staging`. The step-05 work that reinstated the two prepare endpoints as
  * POSTs taking credentials in the body — rather than reading a copy stored server-side — landed as
@@ -52,19 +56,17 @@ export type SubmitOutcome =
   | { kind: "partial"; posted: number; failed: number }
   | { kind: "failed"; failed: number };
 
-/**
- * The body both prepare calls take: `OneAdvancedCredentials(String username, String password)`.
- *
- * <p>Plain `username` / `password`, deliberately — the server's record has no OneAdvanced prefix on
- * its components, and Jackson matches on the component names. The prefixed names the step-05 plan
- * used are the one wrong guess here that fails silently: unknown keys are ignored, both fields
- * arrive null, and `prepare()` answers 400 before opening a browser.
- */
-const CREDS_BODY = (creds: OaCredentials) =>
-  JSON.stringify({
-    username: creds.username,
-    password: creds.password,
-  });
+// unknown_key means the backend restarted after we fetched its key: re-seal once. Retrying more
+// could turn a submit loop into a login flood against OneAdvanced.
+async function postSealed<T>(path: string, creds: OaCredentials): Promise<T> {
+  try {
+    return await apiJson<T>(path, { method: "POST", body: JSON.stringify(await sealCredentials(creds)) });
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== "unknown_key") throw e;
+    forgetServerKey();
+    return apiJson<T>(path, { method: "POST", body: JSON.stringify(await sealCredentials(creds)) });
+  }
+}
 
 /**
  * Starts the Azure AD login and sends the Microsoft Authenticator push.
@@ -78,12 +80,10 @@ const CREDS_BODY = (creds: OaCredentials) =>
  * **409**, checked before the login precisely so this route does not make the user approve a push
  * and wait two minutes only to find there is nothing to post under. Both arrive as an `ApiError`
  * whose message is worth showing verbatim.
+ * `sealCredentials` can also throw a `KeyTrustError`, before anything is sent.
  */
 export async function prepareAzure(creds: OaCredentials): Promise<AzurePrepare> {
-  return apiJson<AzurePrepare>("/otj-services/azure-id/prepare", {
-    method: "POST",
-    body: CREDS_BODY(creds),
-  });
+  return postSealed<AzurePrepare>("/otj-services/azure-id/prepare", creds);
 }
 
 /**
@@ -121,10 +121,7 @@ export async function completeAzure(attempts = 3): Promise<SubmitOutcome> {
  * resolves. The 401 and 409 described on `prepareAzure` apply here too.
  */
 export async function prepareBrowser(creds: OaCredentials): Promise<void> {
-  await apiJson<{ status: string }>("/otj-services/prepare-browser", {
-    method: "POST",
-    body: CREDS_BODY(creds),
-  });
+  await postSealed<{ status: string }>("/otj-services/prepare-browser", creds);
 }
 
 /**
@@ -132,6 +129,8 @@ export async function prepareBrowser(creds: OaCredentials): Promise<void> {
  *
  * <p>A rejected code is a 400 whose message says so; it is the one error here a user can fix on the
  * spot, by reading a fresh code and trying again.
+ *
+ * <p>The code isn't sealed: it dies in ~30 s, and a key fetch here would eat into that.
  */
 export async function submitWithMfa(mfaCode: string): Promise<SubmitOutcome> {
   return readOutcome("/otj-services/submit-with-mfa", {
