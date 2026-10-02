@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -85,6 +87,9 @@ export default function Submit() {
   const [mfaCode, setMfaCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
 
+  const screenRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
   /** The draft learner ID while the card is open for editing, or null while it is just displaying. */
   const [learnerDraft, setLearnerDraft] = useState<string | null>(null);
   const [learnerError, setLearnerError] = useState<string | null>(null);
@@ -127,6 +132,30 @@ export default function Submit() {
       setLearnerError(e instanceof Error ? e.message : "Could not save your learner ID."),
     onSettled: () => queryClient.invalidateQueries({ queryKey: profileKey }),
   });
+
+  /**
+   * How much of the screen the keyboard is covering, in points — 0 while it is down.
+   *
+   * <p>Measured rather than left to `automaticallyAdjustKeyboardInsets`, which on a real iPhone did
+   * not leave enough room to scroll the code field and its button above the keypad. The overlap is
+   * the screen's bottom edge minus the keyboard's top, so the tab bar the keyboard also covers is
+   * not counted twice, and a platform that resizes the window for the keyboard comes out at 0.
+   */
+  const [keyboardOverlap, setKeyboardOverlap] = useState(0);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener("keyboardDidShow", (e) => {
+      const keyboardTop = e.endCoordinates.screenY;
+      screenRef.current?.measureInWindow((_x, y, _width, height) =>
+        setKeyboardOverlap(Math.max(0, y + height - keyboardTop)),
+      );
+    });
+    const hidden = Keyboard.addListener("keyboardDidHide", () => setKeyboardOverlap(0));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
 
   const running =
     phase.name === "preparing" || phase.name === "awaitingApproval" || phase.name === "submitting";
@@ -296,8 +325,24 @@ export default function Submit() {
   };
 
   return (
-    <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <View ref={screenRef} style={styles.screen}>
+      <ScrollView
+        ref={scrollRef}
+        // The overlap is added under the content so everything can be scrolled clear of the keyboard.
+        contentContainerStyle={[
+          styles.content,
+          keyboardOverlap > 0 ? { paddingBottom: CONTENT_PADDING + keyboardOverlap } : null,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        // The code panel is the last thing on the screen, so the end is the field *and* its button —
+        // scrolling only the focused field into view would leave "Submit code" under the keypad.
+        // Done on the size change rather than the keyboard event so the padding is already laid out.
+        onContentSizeChange={() => {
+          if (phase.name === "awaitingCode" && keyboardOverlap > 0) {
+            scrollRef.current?.scrollToEnd({ animated: true });
+          }
+        }}
+      >
         <Text style={styles.title}>Submit to OneAdvanced</Text>
         <Text style={styles.subtitle}>
           Signs in as you and posts everything in Pending. You&apos;ll need your phone for the
@@ -623,6 +668,82 @@ function LearnerIdCard({
   );
 }
 
+/**
+ * The OneAdvanced route's code field. Its own component only so it can hold a ref to the input.
+ *
+ * <p>Getting the code means leaving for the authenticator app, and the field comes back from that
+ * still marked focused in React Native's bookkeeping but with no keyboard on screen. A tap then
+ * does nothing at all: TextInput's tap handler calls `focus()`, and `focus()` is a deliberate no-op
+ * on a field it believes is already focused. Blurring first resets that, so both the return to the
+ * app and a tap on the box can bring the keyboard back.
+ */
+function CodeEntry({
+  mfaCode,
+  codeError,
+  onChangeCode,
+  onSendCode,
+}: {
+  mfaCode: string;
+  codeError: string | null;
+  onChangeCode: (text: string) => void;
+  onSendCode: () => void;
+}) {
+  const inputRef = useRef<TextInput>(null);
+
+  // Coming back from the authenticator, put the keyboard straight back up: reading the code is the
+  // only reason to have left, so typing it is the only thing left to do.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      const input = inputRef.current;
+      if (!input) return;
+      if (input.isFocused()) input.blur();
+      input.focus();
+    });
+    return () => sub.remove();
+  }, []);
+
+  return (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Enter your authenticator code</Text>
+      <Text style={styles.panelBody}>
+        Signed in as far as the code prompt. Codes last about 30 seconds, so use the one showing
+        now.
+      </Text>
+      <TextInput
+        ref={inputRef}
+        style={[styles.codeInput, codeError ? styles.codeInputInvalid : null]}
+        value={mfaCode}
+        onChangeText={onChangeCode}
+        // Runs just before TextInput's own focus() on a tap. Only the stuck state is touched —
+        // focused on paper with no keyboard — so an ordinary tap to move the caret does not make
+        // the keyboard drop and come back.
+        onPress={() => {
+          const input = inputRef.current;
+          if (input?.isFocused() && !Keyboard.isVisible()) input.blur();
+        }}
+        placeholder="000000"
+        placeholderTextColor="#9ca3af"
+        keyboardType="number-pad"
+        autoFocus
+        // One-time codes are the one thing worth letting the OS autofill from the keyboard bar.
+        textContentType="oneTimeCode"
+        autoComplete="one-time-code"
+        maxLength={8}
+        accessibilityLabel="Authenticator code"
+      />
+      {codeError ? <Text style={styles.codeError}>{codeError}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        onPress={onSendCode}
+        style={({ pressed }) => [styles.codeButton, pressed ? styles.codeButtonPressed : null]}
+      >
+        <Text style={styles.codeButtonText}>Submit code</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 /** Everything below the button that depends on how far the run has got. */
 function PhasePanel({
   phase,
@@ -673,35 +794,12 @@ function PhasePanel({
 
     case "awaitingCode":
       return (
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Enter your authenticator code</Text>
-          <Text style={styles.panelBody}>
-            Signed in as far as the code prompt. Codes last about 30 seconds, so use the one showing
-            now.
-          </Text>
-          <TextInput
-            style={[styles.codeInput, codeError ? styles.codeInputInvalid : null]}
-            value={mfaCode}
-            onChangeText={onChangeCode}
-            placeholder="000000"
-            placeholderTextColor="#9ca3af"
-            keyboardType="number-pad"
-            autoFocus
-            // One-time codes are the one thing worth letting the OS autofill from the keyboard bar.
-            textContentType="oneTimeCode"
-            autoComplete="one-time-code"
-            maxLength={8}
-            accessibilityLabel="Authenticator code"
-          />
-          {codeError ? <Text style={styles.codeError}>{codeError}</Text> : null}
-          <Pressable
-            accessibilityRole="button"
-            onPress={onSendCode}
-            style={({ pressed }) => [styles.codeButton, pressed ? styles.codeButtonPressed : null]}
-          >
-            <Text style={styles.codeButtonText}>Submit code</Text>
-          </Pressable>
-        </View>
+        <CodeEntry
+          mfaCode={mfaCode}
+          codeError={codeError}
+          onChangeCode={onChangeCode}
+          onSendCode={onSendCode}
+        />
       );
 
     case "done": {
@@ -730,13 +828,15 @@ function Waiting({ label }: { label: string }) {
   );
 }
 
+const CONTENT_PADDING = 24;
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#ffffff",
   },
   content: {
-    padding: 24,
+    padding: CONTENT_PADDING,
     paddingTop: 32,
     gap: 12,
   },

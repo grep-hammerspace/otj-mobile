@@ -1,12 +1,18 @@
 # Expo HAS CHANGED
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before writing any code.
+Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
 
-This project is pinned to **SDK 54**, not the latest SDK. That is deliberate: the
-iOS Expo Go build on the App Store is stuck at 54.0.2 (released 2025-09-23), so
-SDK 55+ cannot run in Expo Go on iOS at all. Do not "helpfully" upgrade the SDK —
-it will break the phone workflow. Moving off 54 requires a development build,
-which on Linux + iPhone means an Apple Developer Program membership.
+This project is on **SDK 57** because that is what the App Store's Expo Go runs. The SDK is
+not ours to choose: iOS Expo Go only ever supports one SDK, it cannot be downgraded on a real
+device, and the phone is the only way this app gets run. So the rule is **match Expo Go** —
+neither ahead of it (an SDK the store build doesn't have yet) nor behind it.
+
+It used to say the opposite. Expo Go sat at 54.0.2 from 2025-09-23 until it jumped straight
+to 57, and from then on the SDK 54 project failed to open with "Project is incompatible with
+this version of Expo Go". If that error comes back, Expo Go has moved again: step through each
+SDK with `npx expo install expo@^N.0.0 --fix` rather than leaping, and check the changelog for
+each one. The way out of this treadmill is a development build, which on Linux + iPhone means
+an Apple Developer Program membership.
 
 # What this app is
 
@@ -183,6 +189,14 @@ Things not to undo:
   on iOS, where Face ID needs a development build. A phone that cannot show the prompt must still be
   able to submit; the gate is a second lock on top of the device's own, not what makes the
   credentials safe.
+- **The code field blurs before it focuses.** Leaving for the authenticator app strands the field
+  marked focused in RN's `TextInputState` with no keyboard showing, and RN's `focus()` is a no-op on
+  a field it thinks is focused — so every tap on the box did nothing. `CodeEntry` blurs first, both
+  on returning to the app and on a tap when no keyboard is up.
+- **The keyboard's overlap is measured, not left to `automaticallyAdjustKeyboardInsets`.** That
+  prop did not leave room to scroll the code field and "Submit code" above the keypad on a real
+  iPhone. The screen pads its content by the measured overlap and scrolls to the end once that
+  padding is laid out — the end, not the focused field, because the button sits below the field.
 
 Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
 keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"

@@ -9,7 +9,7 @@ import type { OaCredentials } from "./oa-credentials";
 // Seals the OneAdvanced credentials to the backend process, so Cloudflare's TLS termination never
 // sees them. Wire format: otjServices/credential-encryption-spec.md. The key to seal to arrives over
 // that same hop, so its announcement must verify against the pinned identity key or nothing is sent.
-// Pure JS: Expo Go (SDK 54) allows no native crypto module.
+// Pure JS: Expo Go allows no native crypto module.
 
 const PINNED_IDENTITY_KEY = process.env.EXPO_PUBLIC_CREDENTIAL_IDENTITY_KEY;
 if (!PINNED_IDENTITY_KEY) throw new Error("EXPO_PUBLIC_CREDENTIAL_IDENTITY_KEY is not set");
