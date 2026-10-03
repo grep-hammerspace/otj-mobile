@@ -282,6 +282,34 @@ Three things not to undo:
 Unlike the OneAdvanced credentials, this is server-side account data: nothing about it is stored on
 the device, and it is read back through react-query under `profileKey`.
 
+# Publishing (Android, Play internal testing)
+
+The audience is the owner and a few apprenticeship colleagues, so the app ships to the Play
+Console's **internal testing** track and goes no further: no review, no production listing, and
+none of the 12-testers-for-14-days rule that gates production for a new personal account. iPhone
+users are not covered by this; they stay on Expo Go until there is an Apple Developer membership.
+
+```
+eas.json   preview → .apk for sideloading; production → .aab, submitted to the internal track
+app.json   android.package and runtimeVersion
+```
+
+- **`android.package` is `io.github.grephammerspace.otj` for good.** Play never lets an app's
+  package change once anything is uploaded. Renaming means a new app listing that nobody has installed.
+- **`EXPO_PUBLIC_*` must live in EAS, not `.env`.** `.env` is gitignored and cloud builds only upload
+  what git tracks, so a build without them crashes on launch through the same throw that guards dev.
+  Both profiles use `"environment": "production"`, and `eas update` needs
+  `--environment production` too (required since SDK 55).
+- **`runtimeVersion` is the `fingerprint` policy** so that an `eas update` only reaches builds whose
+  native side it matches. A JS-only change goes out as an update; adding a native module or bumping
+  the SDK changes the fingerprint and needs a new build. Don't swap in a fixed string: a
+  hand-maintained version that someone forgets to bump ships JS that calls native code the
+  installed app doesn't have.
+- **`versionCode` is remote** (`appVersionSource: "remote"` + `autoIncrement`). EAS bumps it, so
+  don't add one to `app.json`.
+- The first `.aab` must be uploaded by hand in the Play Console. Google's API cannot create an app's
+  first release, so `eas submit` only works from the second build on.
+
 # Checks
 
 ```bash

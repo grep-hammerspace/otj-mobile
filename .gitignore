@@ -47,3 +47,6 @@ example
 .env
 !.env.example
 
+
+# Google Play service account key for eas submit
+*service-account*.json
