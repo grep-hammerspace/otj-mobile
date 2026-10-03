@@ -32,7 +32,10 @@ export type ActivityRow = {
   createdAt: string;
 };
 
-/** A line the server refused: no duration, description or start time, a bad date, or a start outside 09:00–18:00. */
+/** The server refuses a longer line outright, and stores no longer description. */
+export const MAX_ENTRY_CHARS = 500;
+
+/** A line the server refused: a missing field, a bad or weekend date, a start outside 09:00–18:00, or too long. */
 export type ParseError = {
   /** Mirrors the server's `ParsedActivities.ErrorCode` enum, which is closed. */
   error:
@@ -40,7 +43,9 @@ export type ParseError = {
     | "missing_description"
     | "missing_start_time"
     | "outside_working_hours"
-    | "invalid_date";
+    | "invalid_date"
+    | "weekend"
+    | "description_too_long";
   message: string | null;
   /** The offending input line, echoed back. Used to re-populate the box that produced it. */
   raw: string;

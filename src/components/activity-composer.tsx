@@ -16,6 +16,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import {
   formatDuration,
   logActivities,
+  MAX_ENTRY_CHARS,
   normaliseEntry,
   toLines,
   type ActivityRow,
@@ -85,6 +86,7 @@ function useComposer(onClose: () => void, onLogged?: (result: LogActivitiesRespo
   const [error, setError] = useState<string | null>(null);
 
   const lineCount = toLines(entries.map((e) => e.text)).length;
+  const overLimit = entries.some((e) => overCap(e.text));
 
   const setText = (id: string, text: string) =>
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, text } : e)));
@@ -126,6 +128,11 @@ function useComposer(onClose: () => void, onLogged?: (result: LogActivitiesRespo
       setError("Write at least one activity before logging.");
       return;
     }
+    if (overLimit) {
+      setResult(null);
+      setError(`Shorten each entry to ${MAX_ENTRY_CHARS} characters or fewer.`);
+      return;
+    }
 
     const submitted = entries;
     setBusy(true);
@@ -152,6 +159,7 @@ function useComposer(onClose: () => void, onLogged?: (result: LogActivitiesRespo
     result,
     error,
     lineCount,
+    overLimit,
     setText,
     addEntry,
     removeEntry,
@@ -172,7 +180,8 @@ type Composer = ReturnType<typeof useComposer>;
  * across notch and home-button iPhones, Android's edge-to-edge gesture bar, and web at once.
  */
 function ComposerBody({ composer }: { composer: Composer }) {
-  const { entries, busy, result, error, lineCount } = composer;
+  const { entries, busy, result, error, lineCount, overLimit } = composer;
+  const blocked = busy || lineCount === 0 || overLimit;
   const insets = useSafeAreaInsets();
 
   // Floors keep the spacing sane where an inset is 0 — web, older Android, some iPhone states.
@@ -226,7 +235,7 @@ function ComposerBody({ composer }: { composer: Composer }) {
               ) : null}
             </View>
             <TextInput
-              style={styles.entryInput}
+              style={[styles.entryInput, overCap(entry.text) ? styles.entryInputOver : null]}
               value={entry.text}
               onChangeText={(text) => composer.setText(entry.id, text)}
               placeholder="e.g. Spent 2 hours this morning pairing on the auth filter and writing its tests."
@@ -235,6 +244,7 @@ function ComposerBody({ composer }: { composer: Composer }) {
               textAlignVertical="top"
               editable={!busy}
             />
+            <EntryCount text={entry.text} />
           </View>
         ))}
 
@@ -269,13 +279,13 @@ function ComposerBody({ composer }: { composer: Composer }) {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: busy || lineCount === 0, busy }}
+            accessibilityState={{ disabled: blocked, busy }}
             onPress={composer.submit}
-            disabled={busy || lineCount === 0}
+            disabled={blocked}
             style={({ pressed }) => [
               styles.submit,
-              busy || lineCount === 0 ? styles.submitInactive : null,
-              pressed && !busy && lineCount > 0 ? styles.submitPressed : null,
+              blocked ? styles.submitInactive : null,
+              pressed && !blocked ? styles.submitPressed : null,
             ]}
           >
             {busy ? (
@@ -289,6 +299,21 @@ function ComposerBody({ composer }: { composer: Composer }) {
         </View>
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+function overCap(text: string): boolean {
+  return normaliseEntry(text).length > MAX_ENTRY_CHARS;
+}
+
+/** Shown only near the cap; counts what is sent, so collapsed whitespace doesn't count. */
+function EntryCount({ text }: { text: string }) {
+  const length = normaliseEntry(text).length;
+  if (length <= MAX_ENTRY_CHARS - 100) return null;
+  return (
+    <Text style={[styles.entryCount, overCap(text) ? styles.entryCountOver : null]}>
+      {length} / {MAX_ENTRY_CHARS}
+    </Text>
   );
 }
 
@@ -429,6 +454,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     color: "#111827",
+  },
+  entryInputOver: {
+    borderColor: "#dc2626",
+  },
+  entryCount: {
+    alignSelf: "flex-end",
+    fontSize: 12,
+    color: "#6b7280",
+  },
+  entryCountOver: {
+    color: "#b91c1c",
+    fontWeight: "600",
   },
   addEntry: {
     borderWidth: 1,
