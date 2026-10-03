@@ -7,10 +7,14 @@
     "icon": "./assets/images/icon.png",
     "scheme": "otjmobile",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "ios": {
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "package": "io.github.grephammerspace.otj",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
