@@ -333,9 +333,7 @@ function Outcome({
 }
 
 function LoggedRow({ row }: { row: ActivityRow }) {
-  const meta = [row.activityDate, formatDuration(row.hours, row.minutes), row.activityTime]
-    .filter(Boolean)
-    .join(" · ");
+  const meta = [row.activityDate, formatDuration(row.hours, row.minutes), row.activityTime].join(" · ");
   return (
     <View style={styles.row}>
       <Text style={styles.rowMeta}>{meta}</Text>

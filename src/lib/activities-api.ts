@@ -22,7 +22,7 @@ export type ActivityRow = {
   id: string;
   /** `YYYY/MM/DD`. */
   activityDate: string;
-  /** `HH:MM` start time, or `""` when the entry never mentioned one. Never null. */
+  /** `HH:MM` start time. */
   activityTime: string;
   hours: number;
   minutes: number;
