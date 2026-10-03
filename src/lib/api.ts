@@ -1,7 +1,5 @@
+import { baseUrl } from "./server";
 import { clearToken, getToken, notifyUnauthorized } from "./session";
-
-const BASE = process.env.EXPO_PUBLIC_API_URL;
-if (!BASE) throw new Error("EXPO_PUBLIC_API_URL is not set");
 
 /** A response the server rejected, carrying the status and whatever reason it gave. */
 export class ApiError extends Error {
@@ -29,7 +27,7 @@ export async function api(path: string, init: RequestInit = {}): Promise<Respons
 
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(`${baseUrl()}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",

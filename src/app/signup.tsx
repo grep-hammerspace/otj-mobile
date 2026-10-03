@@ -3,7 +3,9 @@ import { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -12,6 +14,7 @@ import { Field, FormError, styles, SubmitButton } from "../components/form";
 import { ApiError } from "../lib/api";
 import { signup } from "../lib/auth-api";
 import { useAuth } from "../lib/auth";
+import { checkSelfHostedServer, parseTailnetUrl } from "../lib/server";
 
 type Errors = Partial<Record<"inviteCode" | "username" | "password" | "learnerId", string>>;
 
@@ -21,9 +24,11 @@ type Errors = Partial<Record<"inviteCode" | "username" | "password" | "learnerId
  * <p>Signup is invite-gated: codes are minted through the admin API (tailnet-only) and handed out
  * one per person. The server claims the code atomically before creating the account, so a code
  * that raced someone else comes back rejected rather than half-applied.
+ *
+ * <p>Below the form, someone running their own backend connects to it instead of signing up.
  */
 export default function Signup() {
-  const { signIn } = useAuth();
+  const { signIn, connectSelfHosted } = useAuth();
 
   const [inviteCode, setInviteCode] = useState("");
   const [username, setUsername] = useState("");
@@ -33,6 +38,11 @@ export default function Signup() {
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [selfHostOpen, setSelfHostOpen] = useState(false);
+  const [serverUrl, setServerUrl] = useState("");
+  const [serverError, setServerError] = useState<string | undefined>(undefined);
+  const [connecting, setConnecting] = useState(false);
 
   const usernameRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
@@ -69,6 +79,30 @@ export default function Signup() {
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onConnect = async () => {
+    setServerError(undefined);
+    const origin = parseTailnetUrl(serverUrl);
+    if (!origin) {
+      setServerError("Enter your server's https://….ts.net address.");
+      return;
+    }
+
+    setConnecting(true);
+    try {
+      const check = await checkSelfHostedServer(origin);
+      if (check === "unreachable") {
+        setServerError("Couldn't reach that server. Check it's running and this phone is on your tailnet.");
+      } else if (check === "not_self_hosted") {
+        setServerError("That server isn't running in self-hosted mode.");
+      } else {
+        // No navigation here either: the guard swaps to the tabs.
+        await connectSelfHosted(origin);
+      }
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -152,7 +186,47 @@ export default function Signup() {
             Already have an account? Sign in
           </Link>
         </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: selfHostOpen }}
+          onPress={() => setSelfHostOpen((open) => !open)}
+          style={styles.footer}
+        >
+          <Text style={[styles.footerLink, selfHostStyles.centred]}>
+            Hosting the backend yourself? Enter your server base URL here
+          </Text>
+        </Pressable>
+
+        {selfHostOpen ? (
+          <View style={selfHostStyles.panel}>
+            <Field
+              label="Server base URL"
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              error={serverError}
+              placeholder="https://your-machine.your-tailnet.ts.net"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              textContentType="URL"
+              returnKeyType="go"
+              onSubmitEditing={onConnect}
+              editable={!connecting}
+            />
+            <SubmitButton title="Connect" onPress={onConnect} busy={connecting} disabled={busy} />
+          </View>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
+
+const selfHostStyles = StyleSheet.create({
+  centred: {
+    textAlign: "center",
+  },
+  panel: {
+    marginTop: 16,
+  },
+});

@@ -27,16 +27,16 @@ export default function RootLayout() {
  * also called `router.replace` would race them.
  */
 function RootNavigator() {
-  const { token, loading } = useAuth();
+  const { signedIn, loading } = useAuth();
 
   if (loading) return null;
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Protected guard={!!token}>
+      <Stack.Protected guard={signedIn}>
         <Stack.Screen name="(tabs)" />
       </Stack.Protected>
-      <Stack.Protected guard={!token}>
+      <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="signup" />
         <Stack.Screen name="login" />
       </Stack.Protected>

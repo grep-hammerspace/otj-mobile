@@ -1,6 +1,7 @@
 import { ApiError, NetworkError, api, apiJson, errorMessage } from "./api";
 import { forgetServerKey, sealCredentials } from "./credential-seal";
 import type { OaCredentials } from "./oa-credentials";
+import { isSelfHosted } from "./server";
 
 /**
  * Pushing the queue to OneAdvanced — the four endpoints that between them log in as the user and
@@ -22,8 +23,9 @@ import type { OaCredentials } from "./oa-credentials";
  * <p>Submitting is the last step of <i>both</i> second calls — there is no separate "now post"
  * endpoint. A login that succeeds and posts nothing is `nothing_to_post`, not a failure.
  *
- * <p>Both prepare calls send the credentials sealed by `credential-seal.ts`; the backend accepts
- * nothing else.
+ * <p>Both prepare calls send the credentials sealed by `credential-seal.ts`; the hosted backend
+ * accepts nothing else. A self-hosted one gets them plain: its TLS ends at the owner's own
+ * `tailscale serve`, and it cannot hold the key this build pins.
  *
  * <p>All four are live on `staging`. The step-05 work that reinstated the two prepare endpoints as
  * POSTs taking credentials in the body — rather than reading a copy stored server-side — landed as
@@ -56,6 +58,14 @@ export type SubmitOutcome =
   | { kind: "partial"; posted: number; failed: number }
   | { kind: "failed"; failed: number };
 
+async function postCredentials<T>(path: string, creds: OaCredentials): Promise<T> {
+  if (isSelfHosted()) {
+    const body = JSON.stringify({ username: creds.username, password: creds.password });
+    return apiJson<T>(path, { method: "POST", body });
+  }
+  return postSealed<T>(path, creds);
+}
+
 // unknown_key means the backend restarted after we fetched its key: re-seal once. Retrying more
 // could turn a submit loop into a login flood against OneAdvanced.
 async function postSealed<T>(path: string, creds: OaCredentials): Promise<T> {
@@ -80,10 +90,11 @@ async function postSealed<T>(path: string, creds: OaCredentials): Promise<T> {
  * **409**, checked before the login precisely so this route does not make the user approve a push
  * and wait two minutes only to find there is nothing to post under. Both arrive as an `ApiError`
  * whose message is worth showing verbatim.
- * `sealCredentials` can also throw a `KeyTrustError`, before anything is sent.
+ * Against the hosted backend, `sealCredentials` can also throw a `KeyTrustError`, before anything
+ * is sent.
  */
 export async function prepareAzure(creds: OaCredentials): Promise<AzurePrepare> {
-  return postSealed<AzurePrepare>("/otj-services/azure-id/prepare", creds);
+  return postCredentials<AzurePrepare>("/otj-services/azure-id/prepare", creds);
 }
 
 /**
@@ -121,7 +132,7 @@ export async function completeAzure(attempts = 3): Promise<SubmitOutcome> {
  * resolves. The 401 and 409 described on `prepareAzure` apply here too.
  */
 export async function prepareBrowser(creds: OaCredentials): Promise<void> {
-  await postSealed<{ status: string }>("/otj-services/prepare-browser", creds);
+  await postCredentials<{ status: string }>("/otj-services/prepare-browser", creds);
 }
 
 /**
