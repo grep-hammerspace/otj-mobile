@@ -20,16 +20,16 @@ The mobile client for `otjServices` (sibling repo, `../otjServices`) — a Java 
 that automates logging off-the-job training hours to OneAdvanced. This app is the only
 intended consumer of that API.
 
-`EXPO_PUBLIC_API_URL` points at the backend and has **no fallback in code**: `lib/api.ts`
-throws at startup if it is unset. A silent wrong default is worse than a crash in dev.
-The backend is reachable over the tailnet, so the URL is a `.ts.net` address (or a tailnet
-IP for `npm run start:tailnet`).
+`EXPO_PUBLIC_API_URL` points at the hosted backend and has **no fallback in code**:
+`lib/server.ts` throws at startup if it is unset. A silent wrong default is worse than a crash in
+dev. A user running their own backend overrides it from the signup screen (see "Self-hosted mode").
 
 # Auth architecture
 
 ```
 lib/session.ts    token storage + a 401 handler registry. React-free on purpose.
 lib/auth.tsx      AuthProvider / useAuth — the single source of truth for signed-in state.
+lib/server.ts     which backend: the built-in URL or a self-hosted one. React-free.
 lib/api.ts        fetch wrapper: base URL, Bearer injection, ApiError / NetworkError,
                   clears the token and notifies the provider on 401.
 lib/auth-api.ts   signup / login / logout against the backend's /auth endpoints.
@@ -55,6 +55,30 @@ tailnet-only. There is no self-serve signup and no client-side way to get a code
 The server refuses to say whether a failed login was a bad username or a bad password, and
 returns one message for invalid/used/expired invite codes alike. Don't infer more specific
 messages from status codes — that would undo the point.
+
+# Self-hosted mode
+
+The backend's `tailscale` branch is a single-user copy that someone runs on their own machine,
+reachable only through `tailscale serve` on their tailnet. It has no signup, no sessions and no
+credential sealing. The link under the signup form ("Hosting the backend yourself?") connects to
+one:
+
+- `parseTailnetUrl` accepts only `https://<name>.ts.net`, optionally with a port and a trailing slash.
+  That server has no auth and is safe only behind `tailscale serve`, so anything else is refused,
+  not trusted.
+- `checkSelfHostedServer` then calls `GET /auth/me` with no token. A self-hosted backend answers
+  200; the hosted one answers 401. That catches a typo or the wrong server before the user lands on
+  screens where every call fails.
+- `connectSelfHosted` stores the origin in the secure store. `api()` sends every call there, and the
+  root guard treats a stored URL as signed in, so the tabs open on Log with no token at all.
+- **Credentials go plain, and only here.** `submit-api.ts` skips `credential-seal.ts` when
+  `isSelfHosted()`. TLS ends at the owner's own `tailscale serve`, so the Cloudflare hop sealing
+  defends against isn't there, and a self-hosted server can't hold the key this build pins.
+  Don't extend the plain path to the hosted backend.
+- Sign out clears the URL (and the react-query cache), which returns to signup. `logout()` skips the
+  revoke call, since there is no session.
+- A fresh self-hosted account has no learner ID. `Profile.learnerId` is `null` until it is set on
+  Submit, which shows "Not set", and prepare answers 409 until then.
 
 # Logging activities
 

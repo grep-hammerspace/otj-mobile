@@ -1,4 +1,5 @@
 import { api, apiJson } from "./api";
+import { isSelfHosted } from "./server";
 
 type TokenResponse = { token: string };
 
@@ -45,6 +46,8 @@ export async function login(username: string, password: string): Promise<string>
  * expires on its own.
  */
 export async function logout(): Promise<void> {
+  // A self-hosted server has no sessions to revoke.
+  if (isSelfHosted()) return;
   try {
     await api("/auth/session", { method: "DELETE" });
   } catch {

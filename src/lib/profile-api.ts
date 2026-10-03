@@ -22,7 +22,8 @@ import { apiJson } from "./api";
  */
 export type Profile = {
   username: string;
-  learnerId: string;
+  /** `null` on a self-hosted account until it is first set. */
+  learnerId: string | null;
 };
 
 /**

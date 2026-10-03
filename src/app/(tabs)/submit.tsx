@@ -589,7 +589,7 @@ function LearnerIdCard({
       <View style={styles.credsCard}>
         <View style={styles.credsText}>
           <Text style={styles.credsUser} numberOfLines={1}>
-            {profile.learnerId}
+            {profile.learnerId ?? "Not set"}
           </Text>
           <Text style={styles.credsPlaceholder}>Sent with every activity you log</Text>
         </View>
