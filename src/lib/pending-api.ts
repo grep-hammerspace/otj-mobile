@@ -47,7 +47,6 @@ export async function getPending(): Promise<PendingResponse> {
  *
  * <p>Everything else about a row — `id`, `createdAt`, and the server-side `learnerId`, `unitId`,
  * `activityType`, `posted` and `tailscaleUserId` the client never sees — is not the user's to set.
- * `activityTime` may be `""`; that is a value, not an omission.
  */
 export type ActivityUpdate = {
   activityDate: string;
