@@ -204,13 +204,8 @@ function PendingItem({
   onEdit: () => void;
 }) {
   const swipeable = useRef<SwipeableMethods>(null);
-  // `activityTime` is `""` when the entry never gave a start time, so the whole "starting at"
-  // clause drops rather than leaving a dangling preposition.
   const duration = formatDuration(row.hours, row.minutes);
-  const meta = [
-    row.activityDate,
-    row.activityTime ? `${duration} starting at ${row.activityTime}` : duration,
-  ].join(" · ");
+  const meta = `${row.activityDate} · ${duration} starting at ${row.activityTime}`;
 
   return (
     <ReanimatedSwipeable
