@@ -1,4 +1,4 @@
-import { normaliseEntry, type ActivityRow } from "./activities-api";
+import { MAX_ENTRY_CHARS, normaliseEntry, type ActivityRow } from "./activities-api";
 import type { ActivityUpdate } from "./pending-api";
 
 /**
@@ -95,6 +95,8 @@ export function validateDraft(draft: ActivityDraft): {
     // Prompt rule 1: relative dates resolve to the most recent match in the past, never a future
     // one. An edit that could back-date forwards would be the one way round that.
     errors.activityDate = "Pick today or a day already past.";
+  } else if (isWeekend(clean.activityDate)) {
+    errors.activityDate = "Pick a weekday. Weekends can't be logged.";
   }
 
   if (clean.activityTime === "") {
@@ -119,12 +121,16 @@ export function validateDraft(draft: ActivityDraft): {
       errors.hours = "Add how long it took.";
     } else if (hours > 24) {
       // A sanity bound, not a working-day rule: the parser caps no duration at all, so neither
-      // does this. See the note in pending-edit-api-spec.md.
+      // does this.
       errors.hours = "That is longer than a day.";
     }
   }
 
-  if (clean.activityImpact === "") errors.activityImpact = "Say what you did.";
+  if (clean.activityImpact === "") {
+    errors.activityImpact = "Say what you did.";
+  } else if (clean.activityImpact.length > MAX_ENTRY_CHARS) {
+    errors.activityImpact = `Keep it to ${MAX_ENTRY_CHARS} characters or fewer.`;
+  }
 
   if (Object.keys(errors).length > 0) return { errors, update: null };
 
@@ -209,6 +215,12 @@ function isFuture(date: string): boolean {
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
   return new Date(year, month - 1, day).getTime() > midnight.getTime();
+}
+
+function isWeekend(date: string): boolean {
+  const [year, month, day] = date.split("/").map(Number);
+  const weekday = new Date(year, month - 1, day).getDay();
+  return weekday === 0 || weekday === 6;
 }
 
 function minutesOfDay(time: string): number {

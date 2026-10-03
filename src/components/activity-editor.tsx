@@ -156,7 +156,7 @@ function EditorBody({
           placeholder="2026/08/12"
           keyboardType="numbers-and-punctuation"
           editable={!busy}
-          hint="Today or any day already past."
+          hint="A weekday, today or earlier."
         />
 
         <EditField
