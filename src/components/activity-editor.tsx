@@ -167,7 +167,7 @@ function EditorBody({
           placeholder="09:00"
           keyboardType="numbers-and-punctuation"
           editable={!busy}
-          hint="24-hour, between 09:00 and 18:00. Leave blank if it had no set start."
+          hint="24-hour, between 09:00 and 18:00."
         />
 
         <View style={styles.durationRow}>
