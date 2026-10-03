@@ -32,10 +32,15 @@ export type ActivityRow = {
   createdAt: string;
 };
 
-/** A line the model refused: no duration, no description, or hours outside 09:00–18:00. */
+/** A line the server refused: no duration, description or start time, a bad date, or a start outside 09:00–18:00. */
 export type ParseError = {
   /** Mirrors the server's `ParsedActivities.ErrorCode` enum, which is closed. */
-  error: "missing_duration" | "missing_description" | "outside_working_hours";
+  error:
+    | "missing_duration"
+    | "missing_description"
+    | "missing_start_time"
+    | "outside_working_hours"
+    | "invalid_date";
   message: string | null;
   /** The offending input line, echoed back. Used to re-populate the box that produced it. */
   raw: string;

@@ -97,16 +97,14 @@ export function validateDraft(draft: ActivityDraft): {
     errors.activityDate = "Pick today or a day already past.";
   }
 
-  // An empty start time is legitimate and common — the model only sets one when the entry gave a
-  // time or a range, so most rows have none.
-  if (clean.activityTime !== "") {
-    if (!TIME_PATTERN.test(clean.activityTime)) {
-      errors.activityTime = "Use HH:MM, e.g. 09:00 — or leave it blank.";
-    } else {
-      const atMinute = minutesOfDay(clean.activityTime);
-      if (atMinute < DAY_START_MINUTES || atMinute > DAY_END_MINUTES) {
-        errors.activityTime = "Start times run from 09:00 to 18:00.";
-      }
+  if (clean.activityTime === "") {
+    errors.activityTime = "Enter the time you started, e.g. 09:00.";
+  } else if (!TIME_PATTERN.test(clean.activityTime)) {
+    errors.activityTime = "Use HH:MM, e.g. 09:00.";
+  } else {
+    const atMinute = minutesOfDay(clean.activityTime);
+    if (atMinute < DAY_START_MINUTES || atMinute > DAY_END_MINUTES) {
+      errors.activityTime = "Start times run from 09:00 to 18:00.";
     }
   }
 
@@ -154,7 +152,7 @@ function normaliseDate(input: string): string {
   return `${year}/${month.padStart(2, "0")}/${day.padStart(2, "0")}`;
 }
 
-/** `9:5` and `9.5` both become `09:05`. Blank stays blank — that is a valid value, not a gap. */
+/** `9:5` and `9.5` both become `09:05`. */
 function normaliseTime(input: string): string {
   const time = input.trim();
   if (time === "") return "";
