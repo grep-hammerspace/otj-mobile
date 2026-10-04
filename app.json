@@ -11,6 +11,7 @@
       "policy": "fingerprint"
     },
     "ios": {
+      "bundleIdentifier": "io.github.grephammerspace.otj",
       "icon": "./assets/expo.icon"
     },
     "android": {
