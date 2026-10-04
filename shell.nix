@@ -19,6 +19,11 @@ pkgs.mkShell {
     # hostname and port stay defined in one place (package.json).
     start-clean() { npm run start:tailnet -- --clear "$@"; }
 
+    # `npm i -g eas-cli` fails here: the global prefix is node's own directory in the
+    # read-only /nix/store. npx runs it from its cache instead, and eas.json's cli.version
+    # floor catches a stale one.
+    eas() { npx --yes eas-cli@latest "$@"; }
+
     echo ""
     echo "otjMobile dev shell ready"
     echo "  node     $(node --version)"
@@ -29,6 +34,7 @@ pkgs.mkShell {
     echo "  start-clean             same, but wipes Metro's cache first"
     echo "                          (use after a merge, or if the app looks stale)"
     echo "  npx expo start --tunnel via relay, if LAN discovery fails"
+    echo "  eas build -p android    EAS CLI (builds, updates, submit)"
     echo ""
   '';
 }

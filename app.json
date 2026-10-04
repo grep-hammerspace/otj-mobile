@@ -11,6 +11,7 @@
       "policy": "fingerprint"
     },
     "ios": {
+      "bundleIdentifier": "io.github.grephammerspace.otj",
       "icon": "./assets/expo.icon"
     },
     "android": {
@@ -46,6 +47,16 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4d6d77da-6d7f-4650-9a30-a7469302d840"
+      }
+    },
+    "owner": "otj_logging",
+    "updates": {
+      "url": "https://u.expo.dev/4d6d77da-6d7f-4650-9a30-a7469302d840"
     }
   }
 }

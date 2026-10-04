@@ -282,20 +282,31 @@ Three things not to undo:
 Unlike the OneAdvanced credentials, this is server-side account data: nothing about it is stored on
 the device, and it is read back through react-query under `profileKey`.
 
-# Publishing (Android, Play internal testing)
+# Publishing (Play internal testing, TestFlight)
 
-The audience is the owner and a few apprenticeship colleagues, so the app ships to the Play
-Console's **internal testing** track and goes no further: no review, no production listing, and
-none of the 12-testers-for-14-days rule that gates production for a new personal account. iPhone
-users are not covered by this; they stay on Expo Go until there is an Apple Developer membership.
+The audience is the owner and a few apprenticeship colleagues, so the app goes to each store's
+beta channel and no further. On Android that is the Play Console's **internal testing** track: no
+review, no production listing, and none of the 12-testers-for-14-days rule that gates production
+for a new personal account. On iOS it is **TestFlight**: the owner as an internal tester, colleagues
+in an external group through a public link, which costs one Beta App Review per version.
 
 ```
-eas.json   preview → .apk for sideloading; production → .aab, submitted to the internal track
-app.json   android.package and runtimeVersion
+eas.json   preview → .apk for sideloading; production → .aab (internal track) / .ipa (TestFlight)
+app.json   android.package, ios.bundleIdentifier, runtimeVersion
 ```
 
-- **`android.package` is `io.github.grephammerspace.otj` for good.** Play never lets an app's
-  package change once anything is uploaded. Renaming means a new app listing that nobody has installed.
+- **`android.package` and `ios.bundleIdentifier` are both `io.github.grephammerspace.otj`, for
+  good.** Play never lets a package change once anything is uploaded, and an App Store Connect
+  record is tied to its bundle ID. Renaming either means a new listing that nobody has installed.
+- **TestFlight builds expire after 90 days.** `eas update` changes the JS inside a build but not
+  its expiry, so iOS needs a fresh `eas build` + `eas submit` at least that often.
+- **Export compliance is answered in App Store Connect, not hard-coded.** `credential-seal.ts`
+  does its own encryption on top of HTTPS, so `ITSAppUsesNonExemptEncryption: false` is a legal
+  declaration rather than boilerplate. Only put it in `app.json` once the owner has answered
+  Apple's questions and the answer really is "exempt".
+- **A store build is the only place Face ID actually prompts.** `expo-local-authentication` is on
+  Expo's auto-applied plugin list, so `NSFaceIDUsageDescription` is filled with its default text
+  without being listed in `plugins`.
 - **`EXPO_PUBLIC_*` must live in EAS, not `.env`.** `.env` is gitignored and cloud builds only upload
   what git tracks, so a build without them crashes on launch through the same throw that guards dev.
   Both profiles use `"environment": "production"`, and `eas update` needs
