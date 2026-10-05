@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,7 +12,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import type { OaCredentials } from "../lib/oa-credentials";
+import { PASSWORD_PERSISTS, type OaCredentials } from "../lib/oa-credentials";
+import { CredentialForm, type CredentialFormHandle } from "./credential-form";
 import { ResultBanner } from "./result-banner";
 
 /**
@@ -27,12 +28,19 @@ import { ResultBanner } from "./result-banner";
  * being entered near other people, and the toggle is what makes a 20-character institutional
  * password correctable without clearing the field and starting over. Which is the entire point of
  * being able to edit these.
+ *
+ * <p>On web the sheet is also the way into a run. The password is never stored there (see
+ * `password-store.web.ts`), so "Submit" opens it with `intent: "run"` and the browser's password
+ * manager fills it; that is why the fields carry `autoComplete` hints and sit in a
+ * `CredentialForm`, and why web gets its own wording — "stored on this phone" would be untrue.
  */
 
 type SheetProps = {
   visible: boolean;
   /** What is already stored, so the sheet opens on the current username rather than empty. */
-  current: OaCredentials | null;
+  current: Pick<OaCredentials, "username"> | null;
+  /** `run` saves and then starts a submit — only used on web, where every run needs the password. */
+  intent: "edit" | "run";
   onClose: () => void;
   onSave: (creds: OaCredentials) => void;
   /** Only offered when something is stored — there is nothing to forget otherwise. */
@@ -70,6 +78,7 @@ export function CredentialsSheet({ visible, current, ...rest }: SheetProps) {
 /** Everything below the nested provider — a component cannot read a context it renders itself. */
 function CredentialsBody({
   current,
+  intent,
   onClose,
   onSave,
   onForget,
@@ -84,6 +93,8 @@ function CredentialsBody({
   const [password, setPassword] = useState("");
   const [reveal, setReveal] = useState(false);
   const [invalid, setInvalid] = useState<{ username?: string; password?: string }>({});
+  const form = useRef<CredentialFormHandle>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const gutter = { paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right };
   const headerPad = { ...gutter, paddingTop: Math.max(insets.top + 12, 16) };
@@ -112,9 +123,15 @@ function CredentialsBody({
       <View style={[styles.header, headerPad]}>
         <View style={styles.headerText}>
           <Text style={styles.headerTitle}>
-            {current ? "Update login details" : "OneAdvanced login"}
+            {intent === "run"
+              ? "Sign in to OneAdvanced"
+              : current
+                ? "Update login details"
+                : "OneAdvanced login"}
           </Text>
-          <Text style={styles.headerMeta}>Stored on this phone only</Text>
+          <Text style={styles.headerMeta}>
+            {PASSWORD_PERSISTS ? "Stored on this phone only" : "Your browser keeps the password"}
+          </Text>
         </View>
         <Pressable
           accessibilityRole="button"
@@ -133,64 +150,87 @@ function CredentialsBody({
       >
         {error ? <ResultBanner tone="error" title="Not saved" detail={error} /> : null}
 
-        <Text style={styles.blurb}>
-          These are your real OneAdvanced credentials — the ones you use on the website, not the
-          ones you use to sign in to this app. They are kept in this phone&apos;s encrypted storage
-          and sent only while a submission is running, encrypted so that only the OTJ server itself
-          can read them.
-        </Text>
+        {PASSWORD_PERSISTS ? (
+          <Text style={styles.blurb}>
+            These are your real OneAdvanced credentials — the ones you use on the website, not the
+            ones you use to sign in to this app. They are kept in this phone&apos;s encrypted
+            storage and sent only while a submission is running, encrypted so that only the OTJ
+            server itself can read them.
+          </Text>
+        ) : (
+          <Text style={styles.blurb}>
+            These are your real OneAdvanced credentials — the ones you use on the website, not the
+            ones you use to sign in to this app. This app remembers only your username: the password
+            is forgotten when you close it, so let your browser save it and it will fill it in next
+            time. Both are sent only while a submission is running, encrypted so that only the OTJ
+            server itself can read them.
+          </Text>
+        )}
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Username or email</Text>
-          <TextInput
-            style={[styles.input, invalid.username ? styles.inputInvalid : null]}
-            value={username}
-            onChangeText={(text) => {
-              setUsername(text);
-              setInvalid((prev) => (prev.username ? { ...prev, username: undefined } : prev));
-            }}
-            placeholder="you@se24.qmul.ac.uk"
-            placeholderTextColor="#9ca3af"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            textContentType="username"
-            editable={!busy}
-          />
-          {invalid.username ? <Text style={styles.fieldError}>{invalid.username}</Text> : null}
-        </View>
-
-        <View style={styles.field}>
-          <View style={styles.labelRow}>
-            <Text style={styles.label}>Password</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={reveal ? "Hide password" : "Show password"}
-              onPress={() => setReveal((prev) => !prev)}
-              hitSlop={12}
-            >
-              <Text style={styles.revealText}>{reveal ? "Hide" : "Show"}</Text>
-            </Pressable>
+        <CredentialForm ref={form} onSubmit={submit}>
+          <View style={styles.field}>
+            <Text style={styles.label}>Username or email</Text>
+            <TextInput
+              style={[styles.input, invalid.username ? styles.inputInvalid : null]}
+              value={username}
+              onChangeText={(text) => {
+                setUsername(text);
+                setInvalid((prev) => (prev.username ? { ...prev, username: undefined } : prev));
+              }}
+              placeholder="you@se24.qmul.ac.uk"
+              placeholderTextColor="#9ca3af"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              autoComplete="username"
+              textContentType="username"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              editable={!busy}
+            />
+            {invalid.username ? <Text style={styles.fieldError}>{invalid.username}</Text> : null}
           </View>
-          <TextInput
-            style={[styles.input, invalid.password ? styles.inputInvalid : null]}
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              setInvalid((prev) => (prev.password ? { ...prev, password: undefined } : prev));
-            }}
-            placeholder={current ? "Enter it again to replace it" : "Your OneAdvanced password"}
-            placeholderTextColor="#9ca3af"
-            // Masked by default. `secureTextEntry` also stops the keyboard learning the word, which
-            // matters more than the dots do.
-            secureTextEntry={!reveal}
-            autoCapitalize="none"
-            autoCorrect={false}
-            textContentType="password"
-            editable={!busy}
-          />
-          {invalid.password ? <Text style={styles.fieldError}>{invalid.password}</Text> : null}
-        </View>
+
+          <View style={styles.field}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>Password</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={reveal ? "Hide password" : "Show password"}
+                onPress={() => setReveal((prev) => !prev)}
+                hitSlop={12}
+              >
+                <Text style={styles.revealText}>{reveal ? "Hide" : "Show"}</Text>
+              </Pressable>
+            </View>
+            <TextInput
+              ref={passwordRef}
+              style={[styles.input, invalid.password ? styles.inputInvalid : null]}
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                setInvalid((prev) => (prev.password ? { ...prev, password: undefined } : prev));
+              }}
+              placeholder={
+                current && intent === "edit"
+                  ? "Enter it again to replace it"
+                  : "Your OneAdvanced password"
+              }
+              placeholderTextColor="#9ca3af"
+              // Masked by default. `secureTextEntry` also stops the keyboard learning the word, which
+              // matters more than the dots do.
+              secureTextEntry={!reveal}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={() => form.current?.submit()}
+              editable={!busy}
+            />
+            {invalid.password ? <Text style={styles.fieldError}>{invalid.password}</Text> : null}
+          </View>
+        </CredentialForm>
 
         {current ? (
           <Pressable
@@ -201,6 +241,12 @@ function CredentialsBody({
           >
             <Text style={styles.forgetText}>Forget these details</Text>
           </Pressable>
+        ) : null}
+        {current && !PASSWORD_PERSISTS ? (
+          <Text style={styles.blurb}>
+            A password your browser saved stays there — remove it in the browser&apos;s password
+            settings.
+          </Text>
         ) : null}
       </ScrollView>
 
@@ -216,7 +262,7 @@ function CredentialsBody({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: busy, busy }}
-          onPress={submit}
+          onPress={() => form.current?.submit()}
           disabled={busy}
           style={({ pressed }) => [
             styles.save,
@@ -227,7 +273,9 @@ function CredentialsBody({
           {busy ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <Text style={styles.saveText}>{current ? "Update" : "Save"}</Text>
+            <Text style={styles.saveText}>
+              {intent === "run" ? "Sign in & submit" : current ? "Update" : "Save"}
+            </Text>
           )}
         </Pressable>
       </View>

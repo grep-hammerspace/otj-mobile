@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { CredentialForm, type CredentialFormHandle } from "../components/credential-form";
 import { Field, FormError, styles, SubmitButton } from "../components/form";
 import { login } from "../lib/auth-api";
 import { useAuth } from "../lib/auth";
@@ -31,6 +32,8 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
 
   const passwordRef = useRef<TextInput>(null);
+  // A real <form> on web, so the browser's password manager offers to save this sign-in.
+  const form = useRef<CredentialFormHandle>(null);
 
   const validate = (): boolean => {
     const next: Errors = {};
@@ -71,37 +74,39 @@ export default function Login() {
 
         <FormError message={formError} />
 
-        <Field
-          label="Username"
-          value={username}
-          onChangeText={setUsername}
-          error={errors.username}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="username"
-          textContentType="username"
-          returnKeyType="next"
-          onSubmitEditing={() => passwordRef.current?.focus()}
-          editable={!busy}
-        />
+        <CredentialForm ref={form} onSubmit={onSubmit}>
+          <Field
+            label="Username"
+            value={username}
+            onChangeText={setUsername}
+            error={errors.username}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            editable={!busy}
+          />
 
-        <Field
-          ref={passwordRef}
-          label="Password"
-          value={password}
-          onChangeText={setPassword}
-          error={errors.password}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="current-password"
-          textContentType="password"
-          returnKeyType="go"
-          onSubmitEditing={onSubmit}
-          editable={!busy}
-        />
+          <Field
+            ref={passwordRef}
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            error={errors.password}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="current-password"
+            textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={() => form.current?.submit()}
+            editable={!busy}
+          />
+        </CredentialForm>
 
-        <SubmitButton title="Sign in" onPress={onSubmit} busy={busy} />
+        <SubmitButton title="Sign in" onPress={() => form.current?.submit()} busy={busy} />
 
         <View style={styles.footer}>
           <Link href="/signup" style={styles.footerLink}>

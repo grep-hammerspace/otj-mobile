@@ -50,3 +50,6 @@ example
 
 # Google Play service account key for eas submit
 *service-account*.json
+
+# Vercel CLI link (org + project IDs) and pulled env files
+.vercel/

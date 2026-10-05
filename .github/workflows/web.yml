@@ -1,0 +1,85 @@
+name: Web
+
+# Builds the web app (the PWA) and deploys it to Vercel. A pull request deploys a preview and
+# points PREVIEW_ALIAS at it; a push to main deploys production. Vercel's own Git deploys are off
+# in vercel.json, so this workflow is the only thing that deploys — and a failed typecheck stops it.
+#
+# EXPO_PUBLIC_* live in the Vercel project, not here: `vercel pull` fetches them for the target
+# environment and `vercel build` inlines them. Without them the export itself fails, because
+# lib/server.ts throws at import and static rendering imports it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: web-${{ github.ref }}
+  # A newer push makes an in-flight preview pointless; a production deploy always finishes.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_CLI: vercel@62.4.0
+  # Stable, so the backend's CORS allowlist can name it. Always the newest preview.
+  PREVIEW_ALIAS: otj-log-preview.vercel.app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: package.json
+          cache: npm
+
+      - name: Install Vercel CLI
+        run: npm install --global "$VERCEL_CLI"
+
+      - name: Choose target
+        run: |
+          if [ "$GITHUB_REF" = refs/heads/main ]; then
+            echo "TARGET=production" >> "$GITHUB_ENV"
+            echo "PROD_FLAG=--prod" >> "$GITHUB_ENV"
+          else
+            echo "TARGET=preview" >> "$GITHUB_ENV"
+            echo "PROD_FLAG=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Pull Vercel settings and env
+        run: vercel pull --yes --environment="$TARGET" --token="$VERCEL_TOKEN"
+
+      # Runs vercel.json's installCommand (npm ci) and buildCommand (expo export), so node_modules
+      # exists for the typecheck after it.
+      - name: Build
+        run: vercel build $PROD_FLAG --token="$VERCEL_TOKEN"
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Deploy
+        id: deploy
+        run: |
+          url=$(vercel deploy --prebuilt $PROD_FLAG --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # CLI deploys don't get the Git integration's branch URL, so the preview gets a fixed name.
+      - name: Alias preview
+        if: env.TARGET == 'preview'
+        run: vercel alias set "${{ steps.deploy.outputs.url }}" "$PREVIEW_ALIAS" --token="$VERCEL_TOKEN"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed to $TARGET"
+            echo "- Deployment: ${{ steps.deploy.outputs.url }}"
+            if [ "$TARGET" = preview ]; then echo "- Preview alias: https://$PREVIEW_ALIAS"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

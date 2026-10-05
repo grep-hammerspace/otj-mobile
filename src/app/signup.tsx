@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { CredentialForm, type CredentialFormHandle } from "../components/credential-form";
 import { Field, FormError, styles, SubmitButton } from "../components/form";
 import { ApiError } from "../lib/api";
 import { signup } from "../lib/auth-api";
@@ -47,6 +48,8 @@ export default function Signup() {
   const usernameRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
   const learnerIdRef = useRef<TextInput>(null);
+  // A real <form> on web, so the browser's password manager offers to save the new account.
+  const form = useRef<CredentialFormHandle>(null);
 
   const validate = (): boolean => {
     const next: Errors = {};
@@ -121,65 +124,68 @@ export default function Signup() {
 
         <FormError message={formError} />
 
-        <Field
-          label="Invite code"
-          value={inviteCode}
-          onChangeText={setInviteCode}
-          error={errors.inviteCode}
-          placeholder="OTJ-XXXX-XXXX"
-          autoCapitalize="characters"
-          autoCorrect={false}
-          returnKeyType="next"
-          onSubmitEditing={() => usernameRef.current?.focus()}
-          editable={!busy}
-        />
+        <CredentialForm ref={form} onSubmit={onSubmit}>
+          <Field
+            label="Invite code"
+            value={inviteCode}
+            onChangeText={setInviteCode}
+            error={errors.inviteCode}
+            placeholder="OTJ-XXXX-XXXX"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            returnKeyType="next"
+            onSubmitEditing={() => usernameRef.current?.focus()}
+            editable={!busy}
+          />
 
-        <Field
-          ref={usernameRef}
-          label="Username"
-          value={username}
-          onChangeText={setUsername}
-          error={errors.username}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="username-new"
-          textContentType="username"
-          returnKeyType="next"
-          onSubmitEditing={() => passwordRef.current?.focus()}
-          editable={!busy}
-        />
+          <Field
+            ref={usernameRef}
+            label="Username"
+            value={username}
+            onChangeText={setUsername}
+            error={errors.username}
+            autoCapitalize="none"
+            autoCorrect={false}
+            // `username-new` is Android's hint for a new account; browsers know only `username`.
+            autoComplete={Platform.OS === "web" ? "username" : "username-new"}
+            textContentType="username"
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            editable={!busy}
+          />
 
-        <Field
-          ref={passwordRef}
-          label="Password"
-          value={password}
-          onChangeText={setPassword}
-          error={errors.password}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="new-password"
-          textContentType="newPassword"
-          returnKeyType="next"
-          onSubmitEditing={() => learnerIdRef.current?.focus()}
-          editable={!busy}
-        />
+          <Field
+            ref={passwordRef}
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            error={errors.password}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="next"
+            onSubmitEditing={() => learnerIdRef.current?.focus()}
+            editable={!busy}
+          />
 
-        <Field
-          ref={learnerIdRef}
-          label="Learner ID"
-          value={learnerId}
-          onChangeText={setLearnerId}
-          error={errors.learnerId}
-          placeholder="Your OneAdvanced learner ID"
-          autoCapitalize="characters"
-          autoCorrect={false}
-          returnKeyType="go"
-          onSubmitEditing={onSubmit}
-          editable={!busy}
-        />
+          <Field
+            ref={learnerIdRef}
+            label="Learner ID"
+            value={learnerId}
+            onChangeText={setLearnerId}
+            error={errors.learnerId}
+            placeholder="Your OneAdvanced learner ID"
+            autoCapitalize="characters"
+            autoCorrect={false}
+            returnKeyType="go"
+            onSubmitEditing={() => form.current?.submit()}
+            editable={!busy}
+          />
+        </CredentialForm>
 
-        <SubmitButton title="Sign up" onPress={onSubmit} busy={busy} />
+        <SubmitButton title="Sign up" onPress={() => form.current?.submit()} busy={busy} />
 
         <View style={styles.footer}>
           <Link href="/login" style={styles.footerLink}>
