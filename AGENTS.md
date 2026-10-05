@@ -224,7 +224,8 @@ Things not to undo:
 
 Credentials survive signing out of *this* app: the OneAdvanced password is long, typed on a phone
 keyboard, and has nothing to do with an expired session token. The sheet's "Forget these details"
-is what clears them.
+is what clears them. On web only the username is kept; the password goes when the page closes (see
+"Web" below).
 
 ## The credentials are encrypted before they leave the phone
 
@@ -320,6 +321,46 @@ app.json   android.package, ios.bundleIdentifier, runtimeVersion
   don't add one to `app.json`.
 - The first `.aab` must be uploaded by hand in the Play Console. Google's API cannot create an app's
   first release, so `eas submit` only works from the second build on.
+
+# Web (the PWA on Vercel)
+
+The same code also ships as an installable web app, which needs neither Expo Go's SDK nor a
+TestFlight build.
+
+```
+src/app/+html.tsx                  the HTML shell: manifest link, apple-* tags, viewport-fit=cover
+public/                            manifest.json and the icons, copied into dist/ as they are
+lib/password-store(.web).ts        where the OneAdvanced password lives: keychain, or memory only
+components/credential-form(.web).tsx  a real <form> on web, a pass-through on native
+vercel.json                        static export settings, headers, Git deploys switched off
+.github/workflows/web.yml          the only thing that deploys: PR → preview, main → production
+```
+
+- **The OneAdvanced password is never written to browser storage.** `tokenStore.web.ts` is
+  `localStorage`, plain text to any script on the origin. On web the password is held in memory
+  for the life of the page, and the browser's password manager keeps it, behind Face ID or a
+  fingerprint on most phones. So on web, Submit opens the credentials sheet whenever no password
+  is in memory (`intent: "run"`), and confirming it starts the run. Don't add a web branch that
+  persists it. The username, session token and self-hosted URL do go in `localStorage`, on purpose.
+- **Login fields sit in a `CredentialForm` and carry `autoComplete` hints.** Safari offers to save a
+  password from a form's submit event, and a `Pressable` never fires one. So buttons call
+  `form.submit()`, which is `requestSubmit()` on web, and never `onSubmit` directly. The form is
+  `display: contents` so it doesn't change the layout.
+- **`viewport-fit=cover` in `+html.tsx` is load-bearing.** Without it an installed iPhone app reports
+  every safe-area inset as 0, and the sheets' close buttons go under the clock.
+- **No service worker.** Every screen is a live API call, so offline has nothing to offer, and a
+  cached bundle is how a fixed bug keeps shipping.
+- **The browser enforces CORS; native never did.** The backend must allow the production
+  `*.vercel.app` origin, the `otj-log-preview.vercel.app` alias and `http://localhost:8082`, and
+  self-hosted servers need the same. A blocked request surfaces as `NetworkError`, and
+  `checkSelfHostedServer` says "unreachable", so check the browser console before suspecting the
+  server.
+- **Deploys come from CI only.** `vercel.json` sets `git.deploymentEnabled: false`, and the workflow
+  runs `vercel pull` → `vercel build` → `tsc` → `vercel deploy --prebuilt`. CLI deploys don't get
+  Vercel's per-branch URL, so each preview is aliased to `otj-log-preview.vercel.app`. GitHub holds
+  only `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`. `EXPO_PUBLIC_*` live in the Vercel
+  project for both Production and Preview, and a missing one fails the export, because static
+  rendering imports `lib/server.ts`.
 
 # Checks
 

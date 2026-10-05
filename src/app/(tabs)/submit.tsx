@@ -19,10 +19,12 @@ import {
   clearCredentials,
   getCredentials,
   getDriverChoice,
+  PASSWORD_PERSISTS,
   saveCredentials,
   setDriverChoice,
   type DriverChoice,
   type OaCredentials,
+  type SavedCredentials,
 } from "../../lib/oa-credentials";
 import { formatTotalMinutes, getPending, pendingKey } from "../../lib/pending-api";
 import { getProfile, profileKey, updateLearnerId, type Profile } from "../../lib/profile-api";
@@ -75,10 +77,12 @@ export default function Submit() {
   // `undefined` while the secure store is being read — the same three-state shape `useAuth` uses,
   // so the screen can tell "no credentials saved" from "haven't looked yet" and not flash the
   // set-up prompt at someone who is already set up.
-  const [creds, setCreds] = useState<OaCredentials | null | undefined>(undefined);
+  const [creds, setCreds] = useState<SavedCredentials | null | undefined>(undefined);
   const [driver, setDriver] = useState<DriverChoice>("azure");
 
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** `run` only on web, where the sheet is how the password gets into a run. */
+  const [sheetIntent, setSheetIntent] = useState<"edit" | "run">("edit");
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
 
@@ -160,6 +164,10 @@ export default function Submit() {
   const running =
     phase.name === "preparing" || phase.name === "awaitingApproval" || phase.name === "submitting";
 
+  // On web a missing password is not a reason to grey the button out — pressing it is how the
+  // password gets asked for. Native still needs something saved first.
+  const canStart = PASSWORD_PERSISTS ? !!creds : creds !== undefined;
+
   const finish = (outcome: SubmitOutcome) => {
     setPhase({ name: "done", outcome });
     // Whatever went, went — the rows are now marked posted server-side and must leave the queue.
@@ -179,13 +187,22 @@ export default function Submit() {
    * <p>Credentials are checked here as well as in the sheet that writes them: this is the call that
    * would otherwise send a blank password to a real login page, and the store is not the only way
    * into this function.
+   *
+   * <p>`filled` is the pair the sheet just took, when it was opened to start this run: on web that
+   * is the only way a password gets here, since it is never stored.
    */
-  const startRun = async () => {
+  const startRun = async (filled?: OaCredentials) => {
     setError(null);
     setCodeError(null);
 
-    if (!creds || !creds.username.trim() || !creds.password) {
-      setError("Add your OneAdvanced login details first.");
+    const login =
+      filled ?? (creds?.password ? { username: creds.username, password: creds.password } : null);
+    if (!login || !login.username.trim() || !login.password) {
+      // On web this is the ordinary first run of a page rather than a mistake, so no error: the
+      // sheet opens ready to sign in and the browser's password manager fills it.
+      if (PASSWORD_PERSISTS) setError("Add your OneAdvanced login details first.");
+      setSheetError(null);
+      setSheetIntent(PASSWORD_PERSISTS ? "edit" : "run");
       setSheetOpen(true);
       return;
     }
@@ -206,7 +223,7 @@ export default function Submit() {
 
     try {
       if (driver === "azure") {
-        const prepared = await prepareAzure(creds);
+        const prepared = await prepareAzure(login);
         setPhase(
           prepared.status === "push_sent"
             ? {
@@ -221,7 +238,7 @@ export default function Submit() {
         );
         finish(await completeAzure());
       } else {
-        await prepareBrowser(creds);
+        await prepareBrowser(login);
         setMfaCode("");
         setPhase({ name: "awaitingCode" });
       }
@@ -268,6 +285,7 @@ export default function Submit() {
   const onSaveCreds = async (next: OaCredentials) => {
     setSheetBusy(true);
     setSheetError(null);
+    let saved = false;
     try {
       await saveCredentials(next);
       setCreds(next);
@@ -276,11 +294,13 @@ export default function Submit() {
       // changed *because* of it.
       setPhase({ name: "idle" });
       setError(null);
+      saved = true;
     } catch {
       setSheetError("Could not save to this phone's secure storage.");
     } finally {
       setSheetBusy(false);
     }
+    if (saved && sheetIntent === "run") startRun(next);
   };
 
   const onForgetCreds = async () => {
@@ -371,7 +391,9 @@ export default function Submit() {
         <View style={styles.credsCard}>
           <View style={styles.credsText}>
             {creds === undefined ? (
-              <Text style={styles.credsPlaceholder}>Checking this phone…</Text>
+              <Text style={styles.credsPlaceholder}>
+                {PASSWORD_PERSISTS ? "Checking this phone…" : "Checking this browser…"}
+              </Text>
             ) : creds ? (
               <>
                 <Text style={styles.credsUser} numberOfLines={1}>
@@ -379,12 +401,20 @@ export default function Submit() {
                 </Text>
                 {/* A fixed number of dots, not the password's length — the length of a password is
                     the one thing about it worth not putting on a screen. */}
-                <Text style={styles.credsMask}>•••••••••••</Text>
+                {creds.password ? (
+                  <Text style={styles.credsMask}>•••••••••••</Text>
+                ) : (
+                  <Text style={styles.credsPlaceholder}>Your browser fills in the password</Text>
+                )}
               </>
             ) : (
               <>
                 <Text style={styles.credsUser}>No login details saved</Text>
-                <Text style={styles.credsPlaceholder}>Needed before anything can be submitted</Text>
+                <Text style={styles.credsPlaceholder}>
+                  {PASSWORD_PERSISTS
+                    ? "Needed before anything can be submitted"
+                    : "Asked for when you submit"}
+                </Text>
               </>
             )}
           </View>
@@ -393,6 +423,7 @@ export default function Submit() {
             accessibilityLabel={creds ? "Edit login details" : "Add login details"}
             onPress={() => {
               setSheetError(null);
+              setSheetIntent("edit");
               setSheetOpen(true);
             }}
             disabled={running || creds === undefined}
@@ -428,13 +459,13 @@ export default function Submit() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Submit queued activities to OneAdvanced"
-          accessibilityState={{ disabled: running || !creds, busy: running }}
-          onPress={startRun}
-          disabled={running || !creds}
+          accessibilityState={{ disabled: running || !canStart, busy: running }}
+          onPress={() => startRun()}
+          disabled={running || !canStart}
           style={({ pressed }) => [
             styles.submitButton,
-            running || !creds ? styles.submitButtonInactive : null,
-            pressed && !running && creds ? styles.submitButtonPressed : null,
+            running || !canStart ? styles.submitButtonInactive : null,
+            pressed && !running && canStart ? styles.submitButtonPressed : null,
           ]}
         >
           <Text style={styles.submitButtonText}>
@@ -468,6 +499,7 @@ export default function Submit() {
       <CredentialsSheet
         visible={sheetOpen}
         current={creds ?? null}
+        intent={sheetIntent}
         onClose={() => setSheetOpen(false)}
         onSave={onSaveCreds}
         onForget={onForgetCreds}

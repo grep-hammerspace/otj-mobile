@@ -1,3 +1,4 @@
+import { deletePassword, getPassword, PASSWORD_PERSISTS, setPassword } from "./password-store";
 import { deleteStored, getStored, setStored } from "./tokenStore";
 
 /**
@@ -12,19 +13,28 @@ import { deleteStored, getStored, setStored } from "./tokenStore";
  * <p>React-free, and for the same reason `session.ts` is: this is storage, and a screen that wants
  * it can call it without dragging a provider along.
  *
- * <p><b>Web is not secure storage.</b> `tokenStore.web.ts` falls back to `localStorage` because
- * `expo-secure-store` has no web implementation, so on a web build these sit in plain text — the
- * same posture the session token already has there, and the same reason web is a bundling check
- * rather than a way to run this app for real.
+ * <p><b>On web the password is never stored.</b> `password-store.web.ts` holds it in memory and
+ * leaves keeping it to the browser's password manager, so there `getCredentials` usually answers
+ * with a username and no password. The username is not a secret and stays in `localStorage`.
  */
 
+export { PASSWORD_PERSISTS };
+
 const USERNAME_KEY = "otj.oa.username";
-const PASSWORD_KEY = "otj.oa.password";
 const DRIVER_KEY = "otj.oa.driver";
 
 export type OaCredentials = {
   username: string;
   password: string;
+};
+
+/**
+ * What is on the device. `password` is null only on web, between the page loading and the user
+ * filling the sheet — a native store holds both halves or nothing.
+ */
+export type SavedCredentials = {
+  username: string;
+  password: string | null;
 };
 
 /**
@@ -41,25 +51,24 @@ export type DriverChoice = "azure" | "otj";
 const DEFAULT_DRIVER: DriverChoice = "azure";
 
 /**
- * Both halves or nothing.
+ * Both halves or nothing, where the password persists.
  *
- * <p>A half-saved pair could only come from a write that failed between the two keys, and there is
- * nothing useful to do with a username and no password — treating it as "not set up" sends the user
- * to the sheet that fixes it, which is where a partial state should land them anyway.
+ * <p>On native a half-saved pair could only come from a write that failed between the two keys,
+ * and there is nothing useful to do with a username and no password — treating it as "not set up"
+ * sends the user to the sheet that fixes it, which is where a partial state should land them
+ * anyway. On web a username without a password is the normal state, not a partial one.
  */
-export async function getCredentials(): Promise<OaCredentials | null> {
-  const [username, password] = await Promise.all([
-    getStored(USERNAME_KEY),
-    getStored(PASSWORD_KEY),
-  ]);
-  if (!username || !password) return null;
-  return { username, password };
+export async function getCredentials(): Promise<SavedCredentials | null> {
+  const [username, password] = await Promise.all([getStored(USERNAME_KEY), getPassword()]);
+  if (!username) return null;
+  if (!password && PASSWORD_PERSISTS) return null;
+  return { username, password: password || null };
 }
 
 export async function saveCredentials({ username, password }: OaCredentials): Promise<void> {
   await Promise.all([
     setStored(USERNAME_KEY, username),
-    setStored(PASSWORD_KEY, password),
+    setPassword(password),
   ]);
 }
 
@@ -69,7 +78,7 @@ export async function saveCredentials({ username, password }: OaCredentials): Pr
  * thing the user asks for, from the credentials sheet.
  */
 export async function clearCredentials(): Promise<void> {
-  await Promise.all([deleteStored(USERNAME_KEY), deleteStored(PASSWORD_KEY)]);
+  await Promise.all([deleteStored(USERNAME_KEY), deletePassword()]);
 }
 
 /**
